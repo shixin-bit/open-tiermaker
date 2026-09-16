@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-ssr
+*.local
+playwright-report
+test-results
+*.log
+.env
+.env.*
+!.env.example
+.husky/_/
