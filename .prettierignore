@@ -2,6 +2,7 @@ node_modules
 dist
 dist-ssr
 *.local
+*.prisma
 playwright-report
 test-results
 *.log

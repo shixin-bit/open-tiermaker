@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  username      String?
+  avatarUrl     String?
+  passwordHash  String?
+  accounts      Account[]
+  boards        Board[]
+  createdAt     DateTime  @default(now())
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Board {
+  id               String          @id @default(cuid())
+  userId           String
+  title            String
+  description      String?
+  visibility       BoardVisibility @default(private)
+  shareId          String?         @unique
+  sharePasswordHash String?
+  tierConfig       Json
+  items            BoardItem[]
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+enum BoardVisibility {
+  private
+  public
+  unlisted
+}
+
+model BoardItem {
+  id        String   @id @default(cuid())
+  boardId   String
+  tierKey   String
+  position  Int
+  title     String?
+  imageData Bytes?
+  board     Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([boardId, tierKey, position])
+}
