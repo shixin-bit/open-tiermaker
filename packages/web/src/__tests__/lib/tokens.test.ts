@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import {
   getAccessToken,
   setAccessToken,
@@ -10,11 +10,10 @@ import {
 
 describe('tokens', () => {
   beforeEach(() => {
-    localStorage.clear()
-    vi.restoreAllMocks()
+    clearTokens()
   })
 
-  describe('access token', () => {
+  describe('access token（内存存储）', () => {
     it('初始状态返回 null', () => {
       expect(getAccessToken()).toBeNull()
     })
@@ -23,47 +22,32 @@ describe('tokens', () => {
       setAccessToken('my-access-token')
       expect(getAccessToken()).toBe('my-access-token')
     })
-
-    it('localStorage 异常时返回 null 不抛错', () => {
-      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-        throw new Error('private mode')
-      })
-      expect(getAccessToken()).toBeNull()
-    })
   })
 
-  describe('refresh token', () => {
-    it('初始状态返回 null', () => {
+  describe('refresh token（HttpOnly Cookie，前端不存储）', () => {
+    it('getRefreshToken 永远返回 null', () => {
       expect(getRefreshToken()).toBeNull()
     })
 
-    it('设置后能读取', () => {
+    it('setRefreshToken 是 no-op，getRefreshToken 仍返回 null', () => {
       setRefreshToken('my-refresh-token')
-      expect(getRefreshToken()).toBe('my-refresh-token')
+      expect(getRefreshToken()).toBeNull()
     })
   })
 
   describe('setTokens', () => {
-    it('同时写入 access 和 refresh', () => {
+    it('只写入 access token，refresh token 忽略', () => {
       setTokens('access-1', 'refresh-1')
       expect(getAccessToken()).toBe('access-1')
-      expect(getRefreshToken()).toBe('refresh-1')
+      expect(getRefreshToken()).toBeNull()
     })
   })
 
   describe('clearTokens', () => {
-    it('清除后两个 token 都为 null', () => {
+    it('清除后 access token 为 null', () => {
       setTokens('a', 'r')
       clearTokens()
       expect(getAccessToken()).toBeNull()
-      expect(getRefreshToken()).toBeNull()
-    })
-
-    it('localStorage 异常时不抛错', () => {
-      vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
-        throw new Error('private mode')
-      })
-      expect(() => clearTokens()).not.toThrow()
     })
   })
 })

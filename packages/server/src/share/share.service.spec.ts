@@ -62,7 +62,7 @@ function createService() {
 beforeEach(() => vi.clearAllMocks());
 
 describe("[ShareService] findByShareId", () => {
-  it("should public 排行榜匿名访问成功", async () => {
+  it("should public 排行榜匿名访问成功，返回 images map", async () => {
     const { service, prisma } = createService();
     prisma.board.findFirst.mockResolvedValueOnce(mockBoard);
     prisma.boardItem.findMany.mockResolvedValueOnce(mockItems);
@@ -73,6 +73,12 @@ describe("[ShareService] findByShareId", () => {
     expect(result.title).toBe("分享的排行榜");
     expect(result.tiers).toEqual(mockBoard.tierConfig);
     expect(result.items).toHaveLength(1);
+    // images map 以 title（前端图片 ID）为 key，src 用 DB id
+    expect(result.images["img_1"]).toBeDefined();
+    expect(result.images["img_1"].src).toBe(
+      "/api/share/share_public/images/item_1",
+    );
+    expect(result.hasSharePassword).toBe(false);
   });
 
   it("should private 排行榜对外返回 NotFound（隐藏存在性）", async () => {
@@ -105,7 +111,7 @@ describe("[ShareService] findByShareId", () => {
   it("should 密码错误抛 Unauthorized", async () => {
     const { service, prisma } = createService();
     prisma.board.findFirst.mockResolvedValueOnce(protectedBoard);
-    vi.mocked(compare).mockResolvedValueOnce(false);
+    vi.mocked(compare).mockImplementationOnce(() => Promise.resolve(false));
 
     await expect(
       service.findByShareId("share_protected", "wrong"),
@@ -116,7 +122,7 @@ describe("[ShareService] findByShareId", () => {
     const { service, prisma } = createService();
     prisma.board.findFirst.mockResolvedValueOnce(protectedBoard);
     prisma.boardItem.findMany.mockResolvedValueOnce(mockItems);
-    vi.mocked(compare).mockResolvedValueOnce(true);
+    vi.mocked(compare).mockImplementationOnce(() => Promise.resolve(true));
 
     const result = await service.findByShareId("share_protected", "correct");
 

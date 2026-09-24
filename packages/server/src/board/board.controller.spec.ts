@@ -34,7 +34,7 @@ vi.mock("../auth/guards/jwt-auth.guard", () => ({
   },
 }));
 
-let app: INestApplication | undefined;
+let app!: INestApplication;
 let prismaMock: ReturnType<typeof createMockPrisma>;
 let configMock: ReturnType<typeof createMockConfig>;
 
@@ -168,10 +168,12 @@ describe("DELETE /boards/:id", () => {
 describe("PUT /boards/:id/content", () => {
   it("should 更新 TierState 成功返回 { success: true }", async () => {
     prismaMock.board.findUnique.mockResolvedValueOnce(mockBoard);
+    prismaMock.boardItem.findMany.mockResolvedValueOnce([]);
 
     const state = {
       tiers: [{ id: "S", label: "S", color: "#ef4444", imageIds: [] }],
       images: {},
+      pool: [],
     };
 
     const res = await request(app.getHttpServer())

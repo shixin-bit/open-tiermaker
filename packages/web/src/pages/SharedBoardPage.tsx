@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { api, ApiError, buildShareImageUrl } from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 import type { CloudBoardDetail } from '@/hooks/useBoardState'
 import type { Tier, ImageItem } from '@open-tiermaker/shared'
 import { TierBoard } from '@/components/TierBoard'
@@ -38,10 +38,11 @@ export function SharedBoardPage() {
 
         const images: Record<string, ImageItem> = {}
         for (const [id, img] of Object.entries(data.images)) {
-          const src = img.src.startsWith('/api/')
-            ? buildShareImageUrl(shareId!, id) +
-              (submittedPassword ? `?password=${encodeURIComponent(submittedPassword)}` : '')
-            : img.src
+          // API 返回的 src 已用 DB id 构造正确的图片 URL，只需追加密码参数
+          const src =
+            img.src.startsWith('/api/') && submittedPassword
+              ? `${img.src}?password=${encodeURIComponent(submittedPassword)}`
+              : img.src
           images[id] = {
             id,
             src,

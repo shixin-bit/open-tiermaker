@@ -1,12 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, act, waitFor } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import { AuthImage } from '@/components/AuthImage'
-import { setAccessToken, clearTokens } from '@/lib/tokens'
-
-function makeBlobResponse(contentType = 'image/png'): Response {
-  const blob = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: contentType })
-  return new Response(blob, { status: 200, headers: { 'Content-Type': contentType } })
-}
 
 function renderAuthImage(src: string, props: Record<string, unknown> = {}) {
   return render(<AuthImage src={src} alt="test-alt" {...props} />)
@@ -14,85 +8,32 @@ function renderAuthImage(src: string, props: Record<string, unknown> = {}) {
 
 describe('AuthImage', () => {
   beforeEach(() => {
-    clearTokens()
     vi.restoreAllMocks()
   })
 
-  describe('非 API 路径', () => {
-    it('直接透传 src，不发 fetch', async () => {
-      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+  describe('基础渲染', () => {
+    it('直接透传 src 到 img', () => {
       renderAuthImage('https://example.com/photo.jpg')
       const img = screen.getByAltText('test-alt')
       expect(img).toHaveAttribute('src', 'https://example.com/photo.jpg')
-      expect(fetchSpy).not.toHaveBeenCalled()
     })
 
-    it('blob: 开头的 src 也直接透传', async () => {
-      renderAuthImage('blob:http://localhost/test')
+    it('data URL 也直接透传', () => {
+      renderAuthImage('data:image/png;base64,abc')
       const img = screen.getByAltText('test-alt')
-      expect(img).toHaveAttribute('src', 'blob:http://localhost/test')
-    })
-  })
-
-  describe('API 路径 + 有 token', () => {
-    it('fetch 成功返回图片时转为 blob URL', async () => {
-      vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeBlobResponse('image/png'))
-      setAccessToken('my-token')
-
-      renderAuthImage('/api/boards/b-1/images/img-1')
-
-      await waitFor(() => {
-        const img = screen.getByAltText('test-alt')
-        expect(img).toHaveAttribute('src', expect.stringMatching(/^blob:/))
-      })
-
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        '/api/boards/b-1/images/img-1',
-        expect.objectContaining({
-          headers: { Authorization: 'Bearer my-token' },
-        }),
-      )
+      expect(img).toHaveAttribute('src', 'data:image/png;base64,abc')
     })
 
-    it('响应不是 2xx 时 fallback 到原始 src', async () => {
-      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 401 }))
-      setAccessToken('token')
-
-      renderAuthImage('/api/boards/b-1/images/img-1')
-
-      await waitFor(() => {
-        const img = screen.getByAltText('test-alt')
-        expect(img).toHaveAttribute('src', '/api/boards/b-1/images/img-1')
-      })
-    })
-
-    it('fetch 抛异常时 fallback 到原始 src', async () => {
-      vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network'))
-      setAccessToken('token')
-
-      renderAuthImage('/api/boards/b-1/images/img-1')
-
-      await waitFor(() => {
-        const img = screen.getByAltText('test-alt')
-        expect(img).toHaveAttribute('src', '/api/boards/b-1/images/img-1')
-      })
-    })
-  })
-
-  describe('API 路径 + 无 token', () => {
-    it('直接透传 src 不发 fetch', async () => {
-      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    it('API 路径也直接透传（图片不鉴权）', () => {
       renderAuthImage('/api/boards/b-1/images/img-1')
       const img = screen.getByAltText('test-alt')
       expect(img).toHaveAttribute('src', '/api/boards/b-1/images/img-1')
-      expect(fetchSpy).not.toHaveBeenCalled()
     })
   })
 
   describe('加载状态 UI', () => {
     it('初始渲染时显示 loading spinner', () => {
       renderAuthImage('https://example.com/photo.jpg')
-      // loading 是一个带 animate-spin class 的 div
       expect(document.querySelector('.animate-spin')).toBeInTheDocument()
     })
 
@@ -154,17 +95,6 @@ describe('AuthImage', () => {
       renderAuthImage('https://example.com/photo.jpg', { className: 'custom-cls' })
       const img = screen.getByAltText('test-alt')
       expect(img.className).toContain('custom-cls')
-    })
-  })
-
-  describe('src 变化', () => {
-    it('src 改变时重新 fetch', async () => {
-      vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeBlobResponse('image/png'))
-      setAccessToken('token')
-      const { rerender } = render(<AuthImage src="/api/a" alt="a" />)
-      await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
-      rerender(<AuthImage src="/api/b" alt="b" />)
-      await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2))
     })
   })
 })

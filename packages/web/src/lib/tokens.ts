@@ -1,40 +1,33 @@
-const ACCESS_KEY = 'otm:access'
-const REFRESH_KEY = 'otm:refresh'
+// Access Token 仅存于内存，随请求头发送。
+// Refresh Token 由后端设置在 HttpOnly Cookie 中，前端不存储。
+let accessToken: string | null = null
 
 export function getAccessToken(): string | null {
-  try {
-    return localStorage.getItem(ACCESS_KEY)
-  } catch {
-    return null
-  }
+  return accessToken
 }
 
 export function setAccessToken(token: string): void {
-  localStorage.setItem(ACCESS_KEY, token)
+  accessToken = token
 }
 
-export function getRefreshToken(): string | null {
-  try {
-    return localStorage.getItem(REFRESH_KEY)
-  } catch {
-    return null
-  }
+export function clearAccessToken(): void {
+  accessToken = null
 }
 
-export function setRefreshToken(token: string): void {
-  localStorage.setItem(REFRESH_KEY, token)
-}
-
-export function setTokens(access: string, refresh: string): void {
+// 向后兼容：之前有 setTokens/clearTokens 调用，保留但只处理 access token。
+export function setTokens(access: string, _refresh: string): void {
   setAccessToken(access)
-  setRefreshToken(refresh)
 }
 
 export function clearTokens(): void {
-  try {
-    localStorage.removeItem(ACCESS_KEY)
-    localStorage.removeItem(REFRESH_KEY)
-  } catch {
-    // ignore
-  }
+  clearAccessToken()
+}
+
+// 保留 getRefreshToken/setRefreshToken 接口但不再实际存储
+export function getRefreshToken(): string | null {
+  return null
+}
+
+export function setRefreshToken(_token: string): void {
+  // no-op：refresh token 由 HttpOnly Cookie 管理
 }

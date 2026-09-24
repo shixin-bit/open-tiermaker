@@ -3,6 +3,7 @@ dist
 dist-ssr
 *.local
 *.prisma
+*.sql
 playwright-report
 test-results
 *.log

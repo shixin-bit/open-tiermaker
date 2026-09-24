@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/hooks/useAuth'
+import { migrateLocalToCloud } from '@/hooks/useBoardState'
 import { ApiError } from '@/lib/api/client'
 
 export function LoginPage() {
@@ -22,6 +23,11 @@ export function LoginPage() {
     setLoading(true)
     try {
       await login(email, password)
+      try {
+        await migrateLocalToCloud()
+      } catch {
+        // best effort
+      }
       navigate(from, { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {

@@ -218,15 +218,34 @@ describe('storage', () => {
           createdAt: 1,
         },
       }
-      const state = mapCloudImagesToState(tiers, images, 'b-1')
+      const items = [{ id: 'item-1', tierKey: 't1', position: 0, title: 'img-1' }]
+      const state = mapCloudImagesToState(tiers, images, items, 'b-1')
       expect(state.tiers).toHaveLength(2)
       expect(state.pool).toEqual([])
       expect(state.images['img-1'].src).toBe('/api/boards/b-1/images/img-1')
       expect(state.images['img-1'].source).toBe('local')
     })
 
+    it('从 items 恢复图片池（tierKey === __pool__）', () => {
+      const images = {
+        'pool-img-1': {
+          id: 'pool-img-1',
+          src: '/api/boards/b-1/images/item-pool-1',
+          source: 'local' as const,
+          createdAt: 1,
+        },
+      }
+      const items = [
+        { id: 'item-pool-1', tierKey: '__pool__', position: 0, title: 'pool-img-1' },
+        { id: 'item-pool-2', tierKey: '__pool__', position: 1, title: 'pool-img-2' },
+        { id: 'item-tier-1', tierKey: 'S', position: 0, title: 'tier-img-1' },
+      ]
+      const state = mapCloudImagesToState([], images, items, 'b-1')
+      expect(state.pool).toEqual(['pool-img-1', 'pool-img-2'])
+    })
+
     it('空输入返回空 state', () => {
-      const state = mapCloudImagesToState([], {}, 'b-1')
+      const state = mapCloudImagesToState([], {}, [], 'b-1')
       expect(state.tiers).toEqual([])
       expect(state.pool).toEqual([])
       expect(state.images).toEqual({})

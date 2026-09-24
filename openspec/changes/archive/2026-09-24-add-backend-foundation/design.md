@@ -1,4 +1,4 @@
-﻿## Context
+## Context
 
 参考 proposal.md 中的 Why。当前项目是单包 Vite + React 应用，数据完全依赖 `src/lib/storage.ts` 写入 localStorage。没有路由、没有后端、没有用户模型。
 
@@ -52,27 +52,24 @@ Render（NestJS 后端 + Postgres）
 
 用户选择 Prisma。schema-first、迁移体系（`prisma migrate dev`）、生成式 TypeScript Client、Postgres 原生支持好（enum、JSON、bytea 二进制列）。本阶段图片以 bytea 存在 Postgres；后续接对象存储时只需改读写逻辑，API 层不动。
 
-### D4: 鉴权 —— JWT 双 Token（access + refresh）
+### D4: 鉴权 —— JWT 双 Token（access in memory + refresh in HttpOnly Cookie）
 
-**因为前后端非同源，JWT 比 Session Cookie 更合适**，具体原因：
+**鉴权方案选择 JWT 双 Token，但存储方式做了 XSS 加固**：
 
-跨域场景下 Cookie 的麻烦：
+- **Access Token**：短时效（默认 15 分钟），存在**前端内存变量**中（不写 localStorage），随 `Authorization: Bearer` header 发送。页面刷新后丢失，需通过 refresh token 重新获取。
+- **Refresh Token**：长时效（默认 7 天），由后端写入 **HttpOnly Cookie**（`SameSite=Lax; HttpOnly; Path=/api/auth`），前端 JavaScript 无法读取。通过 `POST /api/auth/refresh` 自动携带 cookie 换取新 access token。**存在 Redis 中做轮换检测和黑名单**——登出、修改密码踢下线、refresh token 重放检测都靠这个。
+- JWT 的 payload 存 `{ userId, tokenId }`，`tokenId` 对应 Redis 中的记录，服务端通过查 Redis 判断 refresh token 是否仍有效。
 
-- 跨域 fetch 默认不带 Cookie，必须显式 `credentials: 'include'`
-- 后端必须配 `Access-Control-Allow-Credentials: true` + `SameSite=None; Secure`
-- CSRF 风险在 SameSite=None 下重新暴露（浏览器对任何第三方请求仍会自动带 Cookie）
-- Cloudflare Workers 无法操作 session 状态，session store 只能在 Render 上集中存
+**安全考量**：
 
-JWT 双 token 方案：
+- Access token 存内存而非 localStorage → XSS 无法窃取持久化的 token（页面刷新即失效）
+- Refresh token 存 HttpOnly Cookie → JavaScript 无法读取，不受 XSS 影响
+- CORS 配置 `credentials: true` + `SameSite=Lax` → 跨域请求带 cookie 但限制 CSRF 面（仅限 top-level navigation 的 GET 请求自动带 cookie，其他跨域请求不自动带）
+- `cookie-parser` 中间件解析 cookie，refresh/logout 端点从 `req.cookies` 读取
 
-- **Access Token**：短时效（默认 15 分钟），放在 `Authorization: Bearer` header 里；过期后由前端静默刷新
-- **Refresh Token**：长时效（默认 7 天），通过 `POST /api/auth/refresh` 换取新的 access token；**存在 Redis 中做轮换检测和黑名单**——登出、修改密码踢下线、refresh token 重放检测都靠这个
-- JWT 的 payload 存 `{ userId, tokenId }`，`tokenId` 对应 Redis 中的记录，服务端通过查 Redis 判断 refresh token 是否仍有效
-- 前端将 access token 和 refresh token 都存在 **localStorage**（跨域下 HttpOnly Cookie 与 session 方案的 CSRF 等价风险无法同时消弭，接受 XSS 面作为取舍，后续可升级为 httpOnly Cookie 存储）
+OAuth 流程：GitHub/Google 回调成功后，后端签发 refresh token 存入 Redis，通过 `Set-Cookie` 写入 HttpOnly Cookie，然后 302 跳转到前端 `/auth/callback`。前端页面加载时自动调 `/api/auth/refresh`（带 cookie）换取 access token 存入内存。
 
-OAuth 流程：GitHub/Google 回调成功后，后端签发 refresh token 存入 Redis，然后返回一个带 token 的前端跳转链接（如 `https://app.example.com/auth/callback?refresh=xxx`），前端拿到后存 localStorage 并调 `/api/auth/refresh` 换 access token。
-
-备选：Session Cookie。放弃原因：跨域下 Cookie 传递配置繁琐 + SameSite=None 导致 CSRF 风险复燃 + Workers 无法参与 session 管理 + JWT 天然兼容未来移动端接入。
+备选：Access/Refresh 全存 localStorage。放弃原因：XSS 可直接窃取 refresh token 长期冒充用户。当前方案牺牲了"页面刷新不丢登录态"的体验（需多一次 refresh 请求），换取更强的安全边界。
 
 ### D5: 渐进式登录 + 双存储引擎
 
@@ -81,17 +78,21 @@ OAuth 流程：GitHub/Google 回调成功后，后端签发 refresh token 存入
 ```
 StorageEngine (接口)
 ├── LocalStorageEngine   ← 复用现有 storage.ts 逻辑，base64 图片
-└── CloudApiEngine       ← 用 fetch 调用 NestJS API，手动附 Authorization header
+└── CloudApiEngine       ← 用 fetch 调用 NestJS API，自动附 Authorization header + credentials: 'include'
 ```
 
-新增 `useAuth()` Hook，暴露 `{ user, loading, login, logout, register, isAuthenticated }`。现有的 `useBoardState()` Hook 内部根据 `isAuthenticated` 选择引擎：
+新增 `useAuth()` Hook，**以 Context Provider 模式实现**（`AuthProvider` 包裹 App 根组件），所有组件共享同一份认证状态，暴露 `{ user, loading, login, logout, register, isAuthenticated }`。登录成功后所有使用 `useAuth()` 的组件立即感知状态变化（如编辑页的分享面板自动更新）。现有的 `useBoardState()` Hook 内部根据 `isAuthenticated` 选择引擎：
 
 ```ts
 const engine = isAuthenticated ? cloudEngine : localEngine;
 const state = await engine.loadState();
 ```
 
-登录成功后执行一次性迁移 `migrateLocalToCloud()`：加载 localStorage 中所有排行榜 → 逐个调用 `POST /api/boards` → 清空 localStorage → 切换为云端引擎。迁移按排行榜内容哈希去重，服务端已存在的排行榜会被跳过。
+登录成功后执行一次性迁移 `migrateLocalToCloud()`：加载 localStorage 中所有排行榜 → 逐个调用 `POST /api/boards` + `PUT /boards/:id/content` → 返回 `{ localId: cloudId }` 映射 → 清空 localStorage → 切换为云端引擎。迁移在三个入口点触发：
+
+- **LoginPage / RegisterPage**：登录/注册成功后调用，迁移完导航到 `/boards` 列表页
+- **EditBoardPage**：检测 `isAuthenticated` 从 false→true 时，先强制保存当前编辑状态到 localStorage（防抖 auto-save 可能未触发），再调迁移，根据映射导航到 `/boards/{cloudId}` 云端编辑页
+- **OAuthCallbackPage**：OAuth 回调后 `useAuth` 自动刷新获取 access token，再调迁移并导航到列表页
 
 ### D6: React Router 路由
 
@@ -99,7 +100,7 @@ const state = await engine.loadState();
 /                      → 首页（HomePage）—— 功能介绍 + 引导登录
 /login                 → 登录页（LoginPage）—— 邮箱密码 + GitHub + Google
 /register              → 注册页（RegisterPage）
-/auth/callback         → OAuth 回调中间页（前端拿 URL 参数里的 refresh token 存 localStorage）
+/auth/callback         → OAuth 回调中间页（前端页面加载时自动调 /api/auth/refresh，通过 HttpOnly Cookie 换取 access token 存入内存）
 /boards                → 我的排行榜列表（BoardListPage）
 /boards/new            → 创建排行榜（NewBoardPage）
 /boards/:id            → 编辑排行榜（EditBoardPage）
@@ -112,13 +113,13 @@ const state = await engine.loadState();
 
 ```
 # 鉴权
-POST   /api/auth/register         { email, password, username }
-POST   /api/auth/login            { email, password } → 返回 { accessToken, refreshToken }
-POST   /api/auth/logout           { refreshToken } → 服务端黑名单化
-POST   /api/auth/refresh          { refreshToken } → 返回新 accessToken（轮换 refresh token）
+POST   /api/auth/register         { email, password, username } → { accessToken, user } + Set-Cookie: refreshToken
+POST   /api/auth/login            { email, password } → { accessToken, user } + Set-Cookie: refreshToken
+POST   /api/auth/logout           （无 body，从 Cookie 读 refreshToken）→ 服务端黑名单化 + Clear-Cookie
+POST   /api/auth/refresh          （无 body，从 Cookie 读 refreshToken）→ { accessToken } + Set-Cookie: refreshToken（轮换）
 GET    /api/auth/session          → { user: { id, email, username, avatarUrl } | null }（需 access token）
 GET    /api/auth/github           → 重定向到 GitHub OAuth
-GET    /api/auth/github/callback  → 成功后 302 跳转到前端 /auth/callback?refresh=xxx
+GET    /api/auth/github/callback  → 成功后 Set-Cookie + 302 跳转到前端 /auth/callback
 GET    /api/auth/google           → 重定向到 Google OAuth
 GET    /api/auth/google/callback
 
@@ -130,9 +131,10 @@ PUT    /api/boards/:id             → 更新元信息（标题、描述、可�
 DELETE /api/boards/:id
 PUT    /api/boards/:id/content     → 全量更新 TierState（tiers + items）
 
-# 图片（需 access token）
-POST   /api/boards/:id/images      → 上传图片二进制 → { id }
-DELETE /api/boards/:id/images/:imgId
+# 图片（无需 access token，知道 boardId + imgId 即可访问）
+POST   /api/boards/:id/images      → 上传图片二进制 → { id }（需 access token）
+GET    /api/boards/:id/images/:imgId → 返回图片二进制（无需 access token，imgId 为 cuid 难以猜测）
+DELETE /api/boards/:id/images/:imgId（需 access token）
 
 # 分享
 POST   /api/boards/:id/share       → 重新生成 shareId（需登录）
@@ -163,7 +165,7 @@ GET    /api/share/:shareId         → 匿名只读访问（校验可见性 + �
 
 - **[风险] JWT 双 token 机制实现复杂度高于 session** → 换 token 拦截器、401 自动重试、refresh token 轮换逻辑都要自己写；NestJS 的 `@nestjs/jwt` + 自定义 Auth Guard 可搞定，但比 Passport session 工作量大
 - **[风险] Refresh token 仍需要 Redis** → 为了黑名单、轮换检测、密码修改踢下线，refresh token 不能完全无状态；接受这个取舍（Redis 只是为 refresh token 服务，access token 仍是无状态验签）
-- **[风险] Access token 存 localStorage 有 XSS 窃取风险** → 当前架构下前端是纯 Vite React，没有复杂服务端渲染，XSS 面主要靠 CSP 和输入转义控制；后续可升级为 httpOnly Cookie 存 access token 来加固
+- **[已缓解] Access token 不存 localStorage，存在前端内存变量中** → XSS 无法窃取持久化的 token，页面刷新即失效；Refresh token 存 HttpOnly Cookie，JavaScript 不可读，不受 XSS 影响。安全边界显著优于全 localStorage 方案
 - **[风险] Prisma schema 在开发早期频繁变动** → 可接受；`prisma migrate dev` 支持反复调整，schema.prisma 中按模块分节注释保持清晰
 - **[风险] Postgres bytea 存储图片会膨胀数据库** → 本阶段故意为之；下一阶段变更加对象存储并迁移，BoardItem 模型已预留 imageUrl 字段位置
 - **[风险] 登录时 localStorage → 云端迁移的边界情况**（本地和云端有同名排行榜）→ 按内容哈希去重而非按名称，冲突则保留云端副本跳过

@@ -1,16 +1,17 @@
-import { getAccessToken, getRefreshToken, setTokens, clearTokens } from '@/lib/tokens'
+import { getAccessToken, setAccessToken, clearTokens } from '@/lib/tokens'
 
 const BASE_URL = '/api'
 
 const AUTH_REQUIRED_EVENT = 'auth:required'
 
-export function emitAuthRequired() {
-  window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT))
+export function emitAuthRequired(force = false) {
+  window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT, { detail: { force } }))
 }
 
-export function onAuthRequired(handler: () => void): () => void {
-  window.addEventListener(AUTH_REQUIRED_EVENT, handler)
-  return () => window.removeEventListener(AUTH_REQUIRED_EVENT, handler)
+export function onAuthRequired(handler: (force: boolean) => void): () => void {
+  const listener = (e: Event) => handler((e as CustomEvent).detail?.force ?? false)
+  window.addEventListener(AUTH_REQUIRED_EVENT, listener)
+  return () => window.removeEventListener(AUTH_REQUIRED_EVENT, listener)
 }
 
 export class ApiError extends Error {
@@ -50,22 +51,19 @@ async function doRequest(url: string, options: RequestOptions): Promise<Response
     headers.set('Content-Type', 'application/json')
   }
 
-  return fetch(url, { ...options, headers })
+  return fetch(url, { ...options, headers, credentials: 'include' })
 }
 
 async function handleRefresh(): Promise<boolean> {
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) return false
-
   try {
     const res = await fetch(`${BASE_URL}/auth/refresh`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
     })
     if (!res.ok) return false
-    const data = (await res.json()) as { accessToken: string; refreshToken: string }
-    setTokens(data.accessToken, data.refreshToken)
+    const data = (await res.json()) as { accessToken: string }
+    setAccessToken(data.accessToken)
     return true
   } catch {
     return false

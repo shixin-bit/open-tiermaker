@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth, AuthProvider } from '@/hooks/useAuth'
 import type { User } from '@/hooks/useAuth'
 import { clearTokens } from '@/lib/tokens'
 
@@ -47,6 +47,10 @@ function makeUser(overrides: Partial<User> = {}): User {
   }
 }
 
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <AuthProvider>{children}</AuthProvider>
+)
+
 describe('useAuth', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -56,16 +60,19 @@ describe('useAuth', () => {
   })
 
   describe('初始状态 / fetchSession', () => {
-    it('初始 loading 为 true', () => {
+    it('初始 loading 为 true', async () => {
       mockApiGet.mockResolvedValue({ user: null })
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
       expect(result.current.loading).toBe(true)
+      // 等待挂载期 fetchSession 的 setState 完成，避免 act 警告
+      await act(async () => {})
+      expect(result.current.loading).toBe(false)
     })
 
     it('session 返回 user 时标记已登录', async () => {
       const user = makeUser()
       mockApiGet.mockResolvedValue({ user })
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
       await waitFor(() => expect(result.current.loading).toBe(false))
       expect(result.current.user).toEqual(user)
       expect(result.current.isAuthenticated).toBe(true)
@@ -73,7 +80,7 @@ describe('useAuth', () => {
 
     it('session 返回 user: null 时标记未登录', async () => {
       mockApiGet.mockResolvedValue({ user: null })
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
       await waitFor(() => expect(result.current.loading).toBe(false))
       expect(result.current.user).toBeNull()
       expect(result.current.isAuthenticated).toBe(false)
@@ -81,7 +88,7 @@ describe('useAuth', () => {
 
     it('session 请求失败时降级为未登录', async () => {
       mockApiGet.mockRejectedValue(new Error('network down'))
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
       await waitFor(() => expect(result.current.loading).toBe(false))
       expect(result.current.user).toBeNull()
       expect(result.current.isAuthenticated).toBe(false)
@@ -96,7 +103,7 @@ describe('useAuth', () => {
         user: makeUser({ email: 'e@test.com' }),
       })
 
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
 
       await act(async () => {
         await result.current.login('e@test.com', 'secret')
@@ -113,7 +120,7 @@ describe('useAuth', () => {
 
     it('失败时抛出异常', async () => {
       mockApiPost.mockRejectedValue(new Error('401'))
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
 
       await expect(
         act(async () => {
@@ -131,7 +138,7 @@ describe('useAuth', () => {
         user: makeUser({ username: 'newbie' }),
       })
 
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
 
       await act(async () => {
         await result.current.register('new@test.com', 'pw', 'newbie')
@@ -148,20 +155,20 @@ describe('useAuth', () => {
   })
 
   describe('logout', () => {
-    it('有 refresh token 时通知后端并清 token', async () => {
-      localStorage.setItem('otm:refresh', 'rt-existing')
+    it('通知后端清 cookie 并清内存 token', async () => {
       mockApiPost.mockResolvedValue(null)
       mockApiGet.mockResolvedValue({ user: null })
 
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
 
       await act(async () => {
         await result.current.logout()
       })
 
+      // refresh token 由 HttpOnly Cookie 管理，logout 不带 body
       expect(mockApiPost).toHaveBeenCalledWith(
         '/auth/logout',
-        { refreshToken: 'rt-existing' },
+        undefined,
         expect.objectContaining({ skipRefresh: true, auth: false }),
       )
       expect(mockClearTokens).toHaveBeenCalled()
@@ -169,24 +176,10 @@ describe('useAuth', () => {
       expect(result.current.user).toBeNull()
     })
 
-    it('没有 refresh token 时跳过后端调用', async () => {
-      mockApiGet.mockResolvedValue({ user: null })
-
-      const { result } = renderHook(() => useAuth())
-
-      await act(async () => {
-        await result.current.logout()
-      })
-
-      expect(mockApiPost).not.toHaveBeenCalledWith('/auth/logout', expect.anything())
-      expect(mockClearTokens).toHaveBeenCalled()
-    })
-
     it('后端 logout 失败时仍然清 token（best effort）', async () => {
-      localStorage.setItem('otm:refresh', 'rt')
       mockApiPost.mockRejectedValue(new Error('network'))
 
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
 
       await act(async () => {
         await result.current.logout()
@@ -205,7 +198,7 @@ describe('useAuth', () => {
         user: makeUser({ username: 'gh-user' }),
       })
 
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
 
       await act(async () => {
         await result.current.completeOAuth('temp-refresh')
@@ -224,7 +217,7 @@ describe('useAuth', () => {
   describe('refresh', () => {
     it('重新调用 /auth/session', async () => {
       mockApiGet.mockResolvedValue({ user: null })
-      const { result } = renderHook(() => useAuth())
+      const { result } = renderHook(() => useAuth(), { wrapper })
       await waitFor(() => expect(result.current.loading).toBe(false))
       mockApiGet.mockResolvedValue({ user: makeUser() })
 

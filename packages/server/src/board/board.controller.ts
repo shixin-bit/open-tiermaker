@@ -30,15 +30,6 @@ interface AuthedRequest {
   };
 }
 
-interface OptionalAuthRequest {
-  user?: {
-    id: string;
-    email: string;
-    username: string | null;
-    avatarUrl: string | null;
-  };
-}
-
 @Controller("boards")
 export class BoardController {
   constructor(private readonly boardService: BoardService) {}
@@ -116,13 +107,11 @@ export class BoardController {
 
   @Get(":id/images/:imgId")
   async getImage(
-    @Req() req: OptionalAuthRequest,
     @Param("id") id: string,
     @Param("imgId") imgId: string,
     @Res() res: Response,
   ) {
-    const userId = req.user?.id ?? null;
-    const data = await this.boardService.getImage(userId, id, imgId);
+    const data = await this.boardService.getImage(null, id, imgId);
     res.setHeader("Content-Type", "image/png");
     res.send(data);
   }

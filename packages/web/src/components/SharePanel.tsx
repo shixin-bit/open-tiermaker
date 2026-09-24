@@ -98,7 +98,7 @@ export function SharePanel({
       {!isAuthenticated ? (
         <button
           type="button"
-          onClick={() => emitAuthRequired()}
+          onClick={() => emitAuthRequired(true)}
           className="w-full text-left rounded-md border border-dashed border-border bg-muted/30 p-4 hover:border-primary/60 hover:bg-muted/60 transition-colors cursor-pointer"
         >
           <div className="flex items-start justify-between gap-3">

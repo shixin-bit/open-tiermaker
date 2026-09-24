@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { getAccessToken } from '@/lib/tokens'
 
 interface AuthImageProps {
   src: string
@@ -11,10 +10,6 @@ interface AuthImageProps {
   onError?: () => void
 }
 
-function isApiPath(src: string): boolean {
-  return src.startsWith('/api/') || (src.startsWith('http') && src.includes('/api/'))
-}
-
 export function AuthImage({
   src,
   alt = '',
@@ -23,54 +18,23 @@ export function AuthImage({
   onLoad,
   onError,
 }: AuthImageProps) {
-  const [resolvedSrc, setResolvedSrc] = useState<string>(src)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(false)
-  const blobRef = useRef<string | null>(null)
+  const [prevSrc, setPrevSrc] = useState(src)
+  const imgRef = useRef<HTMLImageElement>(null)
 
+  // src 变化时重置状态（React 19 render 期间设 state 模式，避免 effect 级联渲染）
+  if (prevSrc !== src) {
+    setPrevSrc(src)
+    setLoaded(false)
+    setError(false)
+  }
+
+  // data URL 或缓存图片可能在 React 挂载 onLoad 监听器之前就已加载完成，
+  // 导致 onLoad 永不触发。这里在 src 变化后检查 img.complete。
   useEffect(() => {
-    let cancelled = false
-
-    async function resolve() {
-      setLoaded(false)
-      setError(false)
-
-      if (!isApiPath(src)) {
-        setResolvedSrc(src)
-        return
-      }
-
-      const token = getAccessToken()
-      if (!token) {
-        setResolvedSrc(src)
-        return
-      }
-
-      try {
-        const res = await fetch(src, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        if (cancelled) return
-        if (res.ok && res.headers.get('content-type')?.startsWith('image/')) {
-          const blob = await res.blob()
-          const url = URL.createObjectURL(blob)
-          blobRef.current = url
-          setResolvedSrc(url)
-        } else {
-          setResolvedSrc(src)
-        }
-      } catch {
-        if (!cancelled) setResolvedSrc(src)
-      }
-    }
-
-    resolve()
-    return () => {
-      cancelled = true
-      if (blobRef.current) {
-        URL.revokeObjectURL(blobRef.current)
-        blobRef.current = null
-      }
+    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+      setLoaded(true)
     }
   }, [src])
 
@@ -87,7 +51,8 @@ export function AuthImage({
         </div>
       ) : (
         <img
-          src={resolvedSrc}
+          ref={imgRef}
+          src={src}
           alt={alt}
           draggable={draggable}
           onLoad={() => {

@@ -12,7 +12,7 @@ vi.mock("bcrypt", () => ({
   compare: vi.fn(),
 }));
 
-let app: INestApplication | undefined;
+let app!: INestApplication;
 let prismaMock: ReturnType<typeof createMockPrisma>;
 
 const mockPublicBoard = {
@@ -113,7 +113,9 @@ describe("GET /share/:shareId", () => {
       sharePasswordHash: "$2b$10$abc",
     });
     prismaMock.boardItem.findMany.mockResolvedValueOnce(mockItems);
-    vi.mocked(bcrypt.compare).mockResolvedValueOnce(true);
+    vi.mocked(bcrypt.compare).mockImplementationOnce(() =>
+      Promise.resolve(true),
+    );
 
     const res = await request(app.getHttpServer())
       .get("/share/share_protected")

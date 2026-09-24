@@ -9,6 +9,7 @@ import {
   generateId,
   mapCloudImagesToState,
   loadAllBoards,
+  clearAllBoards,
 } from '@/lib/storage'
 
 export interface CloudBoardSummary {
@@ -96,7 +97,7 @@ export function useBoardState(boardId: string | null, isAuthenticated: boolean) 
       if (isAuthenticated) {
         const board = await api.get<CloudBoardDetail>(`/boards/${boardId}`)
         return {
-          state: mapCloudImagesToState(board.tiers, board.images, boardId),
+          state: mapCloudImagesToState(board.tiers, board.images, board.items, boardId),
           title: board.title,
           description: board.description ?? undefined,
           visibility: board.visibility,
@@ -146,6 +147,21 @@ export function useBoardState(boardId: string | null, isAuthenticated: boolean) 
       cancelled = true
     }
   }, [load])
+
+  // 游客模式下自动保存到 localStorage（防抖 1 秒），避免用户忘记点保存按钮导致数据丢失
+  useEffect(() => {
+    if (!boardId || isAuthenticated || !loaded) return
+    const timer = setTimeout(() => {
+      saveBoard({
+        id: boardId,
+        title,
+        description,
+        state,
+        updatedAt: Date.now(),
+      })
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [boardId, isAuthenticated, loaded, state, title, description])
 
   const save = useCallback(
     async (newState?: TierState, newTitle?: string, newDescription?: string) => {
@@ -231,10 +247,17 @@ export function useBoardState(boardId: string | null, isAuthenticated: boolean) 
   }
 }
 
-export async function migrateLocalToCloud(): Promise<{ imported: number; skipped: number }> {
+let lastMigrationMapping: Record<string, string> = {}
+
+export async function migrateLocalToCloud(): Promise<{
+  imported: number
+  skipped: number
+  mapping: Record<string, string>
+}> {
   const localBoards = loadAllBoards()
   let imported = 0
   let skipped = 0
+  const mapping: Record<string, string> = {}
 
   for (const board of localBoards) {
     try {
@@ -243,13 +266,24 @@ export async function migrateLocalToCloud(): Promise<{ imported: number; skipped
         description: board.description,
       })
       await api.put(`/boards/${created.id}/content`, board.state)
+      mapping[board.id] = created.id
       imported++
     } catch {
       skipped++
     }
   }
 
-  return { imported, skipped }
+  // 迁移成功后清理本地数据，避免重复迁移
+  if (imported > 0) {
+    clearAllBoards()
+  }
+
+  lastMigrationMapping = mapping
+  return { imported, skipped, mapping }
+}
+
+export function getLastMigrationMapping(): Record<string, string> {
+  return lastMigrationMapping
 }
 
 export function generateLocalBoardId(): string {

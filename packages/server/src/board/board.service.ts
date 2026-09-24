@@ -139,6 +139,17 @@ export class BoardService {
     if (!board) throw new NotFoundException("Board not found");
     if (board.userId !== userId) throw new ForbiddenException("Not authorized");
 
+    // 保存前先查出已存在的 items，以便对已上传的图片（URL src）保留其 imageData。
+    // 第一次保存后 item.id 会变（deleteMany + createMany），但 title 始终存前端 img.id，
+    // 所以优先按 title 查；首次上传（title 为 null）时回退到按 id 查。
+    const existingItems = await this.prisma.boardItem.findMany({
+      where: { boardId },
+    });
+    const existingByTitle = new Map(
+      existingItems.filter((i) => i.title).map((i) => [i.title!, i]),
+    );
+    const existingById = new Map(existingItems.map((i) => [i.id, i]));
+
     await this.prisma.$transaction(async (tx) => {
       await tx.boardItem.deleteMany({ where: { boardId } });
 
@@ -155,10 +166,17 @@ export class BoardService {
         tier.imageIds.forEach((imgId, pos) => {
           const img = state.images[imgId];
           if (img?.src) {
-            const imageData =
-              img.source === "local" && img.src.startsWith("data:")
-                ? this.base64ToBuffer(img.src)
-                : undefined;
+            let imageData: Buffer | undefined;
+            if (img.source === "local" && img.src.startsWith("data:")) {
+              // 新上传的本地图片（data URL），转成 Buffer 存储
+              imageData = this.base64ToBuffer(img.src);
+            } else {
+              // URL src：图片此前已上传并存储，从已存在 item 中保留 imageData
+              const existing =
+                existingByTitle.get(img.id) ?? existingById.get(img.id);
+              imageData =
+                (existing?.imageData as Buffer | undefined) ?? undefined;
+            }
             itemsToCreate.push({
               boardId,
               tierKey: tier.id,
@@ -170,6 +188,30 @@ export class BoardService {
           }
         });
       }
+
+      // 保存图片池中的图片（tierKey = "__pool__"）
+      state.pool.forEach((imgId, pos) => {
+        const img = state.images[imgId];
+        if (img?.src) {
+          let imageData: Buffer | undefined;
+          if (img.source === "local" && img.src.startsWith("data:")) {
+            imageData = this.base64ToBuffer(img.src);
+          } else {
+            const existing =
+              existingByTitle.get(img.id) ?? existingById.get(img.id);
+            imageData =
+              (existing?.imageData as Buffer | undefined) ?? undefined;
+          }
+          itemsToCreate.push({
+            boardId,
+            tierKey: "__pool__",
+            position: pos,
+            title: img.id,
+            imageData,
+            createdAt: img.createdAt ? new Date(img.createdAt) : undefined,
+          });
+        }
+      });
 
       if (itemsToCreate.length > 0) {
         await tx.boardItem.createMany({
@@ -186,19 +228,13 @@ export class BoardService {
     return { success: true };
   }
 
-  async getImage(userId: string | null, boardId: string, imageId: string) {
+  async getImage(_userId: string | null, boardId: string, imageId: string) {
     const board = await this.prisma.board.findUnique({
       where: { id: boardId },
     });
     if (!board) throw new NotFoundException("Board not found");
 
-    const isOwner = userId !== null && board.userId === userId;
-    if (!isOwner) {
-      if (board.visibility === "private") {
-        throw new ForbiddenException("Not authorized");
-      }
-    }
-
+    // 图片资源不做鉴权：知道 boardId + imgId 即可访问（imgId 为 cuid 难以猜测）。
     const item = await this.prisma.boardItem.findFirst({
       where: { boardId, id: imageId },
     });
@@ -260,10 +296,12 @@ export class BoardService {
     > = {};
 
     for (const item of items) {
-      const imgId = item.id;
+      // 用 title（前端图片 ID）作为 images map 的 key，与 tierConfig.imageIds 对齐。
+      // title 为 null 时（uploadImage 创建的未保存图片）回退到 item.id。
+      const imgId = item.title || item.id;
       images[imgId] = {
         id: imgId,
-        src: item.imageData ? `/api/boards/${board.id}/images/${imgId}` : "",
+        src: item.imageData ? `/api/boards/${board.id}/images/${item.id}` : "",
         source: "local",
         createdAt: item.createdAt.getTime(),
       };

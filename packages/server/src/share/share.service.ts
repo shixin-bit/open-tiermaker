@@ -30,12 +30,29 @@ export class ShareService {
       orderBy: [{ tierKey: "asc" }, { position: "asc" }],
     });
 
+    const images: Record<
+      string,
+      { id: string; src: string; source: "local"; createdAt: number }
+    > = {};
+    for (const i of items) {
+      // 用 title（前端图片 ID）作为 key，与 tierConfig.imageIds 对齐；
+      // src 用 item.id（DB id）构造，与 getImage 的查询一致。
+      const imgId = i.title || i.id;
+      images[imgId] = {
+        id: imgId,
+        src: i.imageData ? `/api/share/${shareId}/images/${i.id}` : "",
+        source: "local",
+        createdAt: i.createdAt.getTime(),
+      };
+    }
+
     return {
       id: board.id,
       title: board.title,
       description: board.description,
       visibility: board.visibility,
       shareId: board.shareId,
+      hasSharePassword: !!board.sharePasswordHash,
       sharedBy: board.userId,
       createdAt: board.createdAt,
       updatedAt: board.updatedAt,
@@ -47,6 +64,7 @@ export class ShareService {
         title: i.title,
         hasImage: !!i.imageData,
       })),
+      images,
     };
   }
 

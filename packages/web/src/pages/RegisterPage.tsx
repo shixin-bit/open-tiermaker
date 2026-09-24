@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/hooks/useAuth'
+import { migrateLocalToCloud } from '@/hooks/useBoardState'
 import { ApiError } from '@/lib/api/client'
 
 export function RegisterPage() {
@@ -32,6 +33,11 @@ export function RegisterPage() {
     setLoading(true)
     try {
       await register(email, password, username || undefined)
+      try {
+        await migrateLocalToCloud()
+      } catch {
+        // best effort
+      }
       navigate('/boards', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {

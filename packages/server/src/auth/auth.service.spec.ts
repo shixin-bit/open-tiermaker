@@ -148,7 +148,9 @@ describe("[AuthService] register", () => {
 describe("[AuthService] validateLocal", () => {
   it("should 密码正确返回用户", async () => {
     const { service, prisma } = createService();
-    vi.mocked(bcrypt.compare).mockResolvedValueOnce(true);
+    vi.mocked(bcrypt.compare).mockImplementationOnce(() =>
+      Promise.resolve(true),
+    );
     prisma.user.findUnique.mockResolvedValueOnce(mockUser);
 
     const result = await service.validateLocal(
@@ -181,7 +183,9 @@ describe("[AuthService] validateLocal", () => {
 
   it("should 密码错误抛 UnauthorizedException", async () => {
     const { service, prisma } = createService();
-    vi.mocked(bcrypt.compare).mockResolvedValueOnce(false);
+    vi.mocked(bcrypt.compare).mockImplementationOnce(() =>
+      Promise.resolve(false),
+    );
     prisma.user.findUnique.mockResolvedValueOnce(mockUser);
 
     await expect(

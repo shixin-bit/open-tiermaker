@@ -120,6 +120,12 @@ export function mapCloudImagesToState(
     string,
     { id: string; src: string; source: 'local' | 'url'; createdAt: number }
   >,
+  cloudItems: Array<{
+    id: string
+    tierKey: string
+    position: number
+    title: string | null
+  }>,
   _boardId: string,
 ): TierState {
   const images: Record<string, ImageItem> = {}
@@ -131,6 +137,14 @@ export function mapCloudImagesToState(
       src: img.src.startsWith('/api/') ? img.src : img.src,
       source: img.source,
       createdAt: img.createdAt,
+    }
+  }
+
+  // 从 items 中恢复图片池（tierKey === "__pool__"）
+  for (const item of cloudItems) {
+    if (item.tierKey === '__pool__') {
+      const imgId = item.title || item.id
+      if (!pool.includes(imgId)) pool.push(imgId)
     }
   }
 

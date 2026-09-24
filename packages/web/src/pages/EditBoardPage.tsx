@@ -21,7 +21,8 @@ import { UrlImageInput } from '@/components/UrlImageInput'
 import { ExportButton } from '@/components/ExportButton'
 import { SharePanel } from '@/components/SharePanel'
 import { useAuth } from '@/hooks/useAuth'
-import { useBoardState } from '@/hooks/useBoardState'
+import { useBoardState, migrateLocalToCloud } from '@/hooks/useBoardState'
+import { saveBoard } from '@/lib/storage'
 import { useLocalStorageSize } from '@/hooks/useLocalStorageSize'
 import type { ImageItem, TierState } from '@open-tiermaker/shared'
 
@@ -72,6 +73,7 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
     setState,
     title,
     setTitle,
+    description,
     loading,
     loaded,
     save,
@@ -89,6 +91,35 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
   const [overContainerId, setOverContainerId] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const { mb, warning: storageWarning } = useLocalStorageSize()
+
+  // 检测认证状态从 false → true（游客在编辑页登录后触发迁移）
+  const prevAuthRef = useRef(isAuthenticated)
+  useEffect(() => {
+    if (prevAuthRef.current === false && isAuthenticated && boardId) {
+      // 强制保存当前状态到 localStorage（防抖 auto-save 可能还未触发）
+      saveBoard({
+        id: boardId,
+        title,
+        description,
+        state,
+        updatedAt: Date.now(),
+      })
+      // 迁移所有本地排行榜到云端，获取 localId → cloudId 映射
+      migrateLocalToCloud()
+        .then(({ mapping }) => {
+          const cloudId = mapping[boardId]
+          if (cloudId) {
+            navigate(`/boards/${cloudId}`, { replace: true })
+          } else {
+            navigate('/boards', { replace: true })
+          }
+        })
+        .catch(() => {
+          navigate('/boards', { replace: true })
+        })
+    }
+    prevAuthRef.current = isAuthenticated
+  }, [isAuthenticated, boardId, title, description, state, navigate])
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),

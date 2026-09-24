@@ -18,6 +18,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ConfigService } from "@nestjs/config";
 import * as bcrypt from "bcrypt";
 import type { TierState } from "@open-tiermaker/shared";
+import type { Readable } from "node:stream";
 
 const mockBoard = {
   id: "board_1",
@@ -68,6 +69,8 @@ function createService() {
         boardItem: { deleteMany: vi.fn(), createMany: vi.fn() },
         board: { update: vi.fn() },
       };
+      // 暴露 tx 给测试断言使用
+      (prisma as unknown as { _lastTx: typeof tx })._lastTx = tx;
       return fn(tx);
     }),
   };
@@ -153,7 +156,7 @@ describe("[BoardService] list", () => {
 });
 
 describe("[BoardService] findOne", () => {
-  it("should owner 可查，返回含 items/images 的 DTO", async () => {
+  it("should owner 可查，返回含 items/images 的 DTO，images 以 title 为 key", async () => {
     const { service, prisma } = createService();
     prisma.board.findUnique.mockResolvedValueOnce(mockBoard);
     prisma.boardItem.findMany.mockResolvedValueOnce([mockItem]);
@@ -162,6 +165,11 @@ describe("[BoardService] findOne", () => {
 
     expect(result.id).toBe("board_1");
     expect(prisma.boardItem.findMany).toHaveBeenCalled();
+    // images map key 应为 item.title（前端图片 ID），而非 item.id
+    expect(result.images["img_1"]).toBeDefined();
+    expect(result.images["img_1"].src).toBe(
+      "/api/boards/board_1/images/item_1",
+    );
   });
 
   it("should 非 owner 抛 ForbiddenException", async () => {
@@ -375,16 +383,168 @@ describe("[BoardService] updateContent", () => {
         createdAt: 1700000000000,
       },
     },
+    pool: [],
   };
 
   it("should 事务全量更新：删旧 items → 写新 items → 更新 tierConfig", async () => {
     const { service, prisma } = createService();
     prisma.board.findUnique.mockResolvedValueOnce(mockBoard);
+    prisma.boardItem.findMany.mockResolvedValueOnce([]);
 
     const result = await service.updateContent("user_123", "board_1", state);
 
     expect(prisma.$transaction).toHaveBeenCalled();
     expect(result.success).toBe(true);
+  });
+
+  it("should data URL 图片转 Buffer 写入 imageData", async () => {
+    const { service, prisma } = createService();
+    prisma.board.findUnique.mockResolvedValueOnce(mockBoard);
+    prisma.boardItem.findMany.mockResolvedValueOnce([]);
+
+    await service.updateContent("user_123", "board_1", state);
+
+    const tx = (
+      prisma as unknown as {
+        _lastTx: { boardItem: { createMany: ReturnType<typeof vi.fn> } };
+      }
+    )._lastTx;
+    expect(tx.boardItem.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            title: "img_1",
+            imageData: expect.any(Buffer),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("should URL src 图片保留已存在 item 的 imageData", async () => {
+    const { service, prisma } = createService();
+    prisma.board.findUnique.mockResolvedValueOnce(mockBoard);
+    // 已存在的 item，imageData 应被保留
+    prisma.boardItem.findMany.mockResolvedValueOnce([
+      { id: "img_1", imageData: Buffer.from("preserved-bytes") },
+    ]);
+
+    const urlState: TierState = {
+      tiers: [{ id: "S", label: "S", color: "#ef4444", imageIds: ["img_1"] }],
+      images: {
+        img_1: {
+          id: "img_1",
+          src: "/api/boards/board_1/images/img_1",
+          source: "local" as const,
+          createdAt: 1700000000000,
+        },
+      },
+      pool: [],
+    };
+
+    await service.updateContent("user_123", "board_1", urlState);
+
+    const tx = (
+      prisma as unknown as {
+        _lastTx: { boardItem: { createMany: ReturnType<typeof vi.fn> } };
+      }
+    )._lastTx;
+    expect(tx.boardItem.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            title: "img_1",
+            imageData: Buffer.from("preserved-bytes"),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("should 图片池中的图片以 tierKey=__pool__ 保存", async () => {
+    const { service, prisma } = createService();
+    prisma.board.findUnique.mockResolvedValueOnce(mockBoard);
+    prisma.boardItem.findMany.mockResolvedValueOnce([]);
+
+    const poolState: TierState = {
+      tiers: [{ id: "S", label: "S", color: "#ef4444", imageIds: [] }],
+      images: {
+        pool_img: {
+          id: "pool_img",
+          src: "data:image/png;base64,iVBORw0KGgo=",
+          source: "local" as const,
+          createdAt: 1700000000000,
+        },
+      },
+      pool: ["pool_img"],
+    };
+
+    await service.updateContent("user_123", "board_1", poolState);
+
+    const tx = (
+      prisma as unknown as {
+        _lastTx: { boardItem: { createMany: ReturnType<typeof vi.fn> } };
+      }
+    )._lastTx;
+    expect(tx.boardItem.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            tierKey: "__pool__",
+            title: "pool_img",
+            imageData: expect.any(Buffer),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("should 第二次保存时通过 title 查到已有 item 并保留 imageData（即使 id 已变）", async () => {
+    const { service, prisma } = createService();
+    prisma.board.findUnique.mockResolvedValueOnce(mockBoard);
+    // 模拟第一次保存后的状态：item.id 已变，但 title 保存了前端 img.id
+    prisma.boardItem.findMany.mockResolvedValueOnce([
+      {
+        id: "new_db_id_after_first_save",
+        title: "img_1",
+        imageData: Buffer.from("preserved-data"),
+        tierKey: "S",
+        position: 0,
+        createdAt: new Date(),
+      },
+    ]);
+
+    // 前端 state 中 img.id 仍为 "img_1"（与 title 一致），src 指向新 DB id
+    const secondSaveState: TierState = {
+      tiers: [{ id: "S", label: "S", color: "#ef4444", imageIds: ["img_1"] }],
+      images: {
+        img_1: {
+          id: "img_1",
+          src: "/api/boards/board_1/images/new_db_id_after_first_save",
+          source: "local" as const,
+          createdAt: 1700000000000,
+        },
+      },
+      pool: [],
+    };
+
+    await service.updateContent("user_123", "board_1", secondSaveState);
+
+    const tx = (
+      prisma as unknown as {
+        _lastTx: { boardItem: { createMany: ReturnType<typeof vi.fn> } };
+      }
+    )._lastTx;
+    expect(tx.boardItem.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            title: "img_1",
+            imageData: Buffer.from("preserved-data"),
+          }),
+        ]),
+      }),
+    );
   });
 
   it("should 非 owner 抛 ForbiddenException", async () => {
@@ -417,7 +577,7 @@ describe("[BoardService] uploadImage", () => {
     size,
     fieldname: "file",
     encoding: "7bit",
-    stream: null as unknown as NodeJS.ReadableStream,
+    stream: null as unknown as Readable,
     destination: "",
     filename: "",
     path: "",

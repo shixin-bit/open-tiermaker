@@ -1,4 +1,4 @@
-﻿## Why
+## Why
 
 Open TierMaker 目前是一个纯前端应用，数据全部存储在浏览器 localStorage 中，容量有限（约 5MB）且无法跨设备访问。没有用户概念、没有云端持久化、没有分享能力——用户辛辛苦苦做好的排行榜换台电脑就没了，也无法分享给他人。加入后端模块，建立鉴权、存储、分享的完整基础设施，是项目从"玩具"走向"可用产品"的关键一步，同时为后续对象存储、社区浏览、实时协作等功能打好可扩展的架构基础。
 
@@ -6,12 +6,14 @@ Open TierMaker 目前是一个纯前端应用，数据全部存储在浏览器 l
 
 - 引入 **monorepo 结构**（pnpm workspace），新增 `packages/server`（NestJS 后端）和 `packages/shared`（前后端共享类型）
 - 新增 **用户系统**：邮箱密码注册登录 + GitHub OAuth + Google OAuth
+- 采用 **JWT 双 Token 鉴权**：Access Token 存前端内存变量（不写 localStorage，防 XSS），Refresh Token 存 HttpOnly Cookie（JavaScript 不可读）；CORS 开启 `credentials: true`，后端用 `cookie-parser` 解析 cookie
 - 新增 **排行榜云端持久化**：登录用户的排行榜数据存入 Postgres，支持多设备同步
 - 新增 **排行榜分享**：生成短链接，支持 private / public / unlisted 三种可见性，可选密码保护
 - 前端引入 **React Router**，支持多页面导航（首页、登录、排行榜列表、编辑页、分享页）
 - 采用 **渐进式登录** 模式：未登录用户以游客身份正常使用所有功能，数据存 localStorage；在恰当场合非阻塞提示登录；登录后 localStorage 数据自动迁移到云端
+- 登录弹窗为**登录表单**（非提示跳转），用户可直接在弹窗内完成登录；`useAuth` 以 Context Provider 实现，登录状态变化即时同步所有组件
 - 保留 `localStorage` 作为游客模式的持久化方案，新增 API 层对接后端
-- 本地图片上传：游客模式继续存 base64 到 localStorage，登录后上传到后端存 Postgres bytea
+- 本地图片上传：游客模式继续存 base64 到 localStorage，登录后上传到后端存 Postgres bytea；图片访问接口无需鉴权（imgId 为 cuid 难以猜测）
 
 ## Capabilities
 

@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
+import cookieParser from "cookie-parser";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { JwtStrategy } from "./strategies/jwt.strategy";
@@ -66,7 +67,7 @@ vi.mock("passport-jwt", () => {
   };
 });
 
-let app: INestApplication | undefined;
+let app!: INestApplication;
 let prismaMock: ReturnType<typeof createMockPrisma>;
 let redisMock: ReturnType<typeof createMockRedis>;
 let jwtMock: ReturnType<typeof createMockJwt>;
@@ -92,6 +93,7 @@ async function setup() {
   }).compile();
 
   app = module.createNestApplication();
+  app.use(cookieParser());
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   await app.init();
 }
@@ -106,7 +108,7 @@ afterEach(async () => {
 });
 
 describe("POST /auth/register", () => {
-  it("should 注册成功返回 access/refresh token + user", async () => {
+  it("should 注册成功返回 access token + user，refresh token 写入 cookie", async () => {
     prismaMock.user.findUnique.mockResolvedValueOnce(null);
     prismaMock.user.create.mockResolvedValueOnce(mockUser);
     jwtMock.sign
@@ -121,7 +123,13 @@ describe("POST /auth/register", () => {
 
     expect(res.status).toBe(HttpStatus.CREATED);
     expect(res.body.accessToken).toBe("access_token_123");
-    expect(res.body.refreshToken).toBe("refresh_token_456");
+    // refresh token 不再返回在 body 中，而是写入 HttpOnly cookie
+    expect(res.body.refreshToken).toBeUndefined();
+    expect(res.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("refreshToken=refresh_token_456"),
+      ]),
+    );
     expect(res.body.user).toBeDefined();
     expect(res.body.user.id).toBe("user_123");
   });
@@ -162,9 +170,11 @@ describe("POST /auth/register", () => {
 });
 
 describe("POST /auth/login", () => {
-  it("should 邮箱密码正确返回 tokens", async () => {
+  it("should 邮箱密码正确返回 access token，refresh token 写入 cookie", async () => {
     prismaMock.user.findUnique.mockResolvedValueOnce(mockUser);
-    vi.mocked(bcrypt.compare).mockResolvedValueOnce(true);
+    vi.mocked(bcrypt.compare).mockImplementationOnce(() =>
+      Promise.resolve(true),
+    );
     jwtMock.sign
       .mockResolvedValueOnce("access_tok")
       .mockResolvedValueOnce("refresh_tok");
@@ -175,7 +185,12 @@ describe("POST /auth/login", () => {
 
     expect(res.status).toBe(HttpStatus.OK);
     expect(res.body.accessToken).toBe("access_tok");
-    expect(res.body.refreshToken).toBe("refresh_tok");
+    expect(res.body.refreshToken).toBeUndefined();
+    expect(res.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("refreshToken=refresh_tok"),
+      ]),
+    );
   });
 
   it("should 用户不存在返回 401", async () => {
@@ -190,7 +205,9 @@ describe("POST /auth/login", () => {
 
   it("should 密码错误返回 401", async () => {
     prismaMock.user.findUnique.mockResolvedValueOnce(mockUser);
-    vi.mocked(bcrypt.compare).mockResolvedValueOnce(false);
+    vi.mocked(bcrypt.compare).mockImplementationOnce(() =>
+      Promise.resolve(false),
+    );
 
     const res = await request(app.getHttpServer())
       .post("/auth/login")
@@ -214,7 +231,7 @@ describe("POST /auth/login", () => {
 });
 
 describe("POST /auth/refresh", () => {
-  it("should 有效 refresh token 返回新 token 对", async () => {
+  it("should 有效 refresh token（cookie）返回新 access token，refresh token 写入 cookie", async () => {
     jwtMock.verify.mockReturnValueOnce({
       userId: "user_123",
       tokenId: "old_tid",
@@ -227,11 +244,16 @@ describe("POST /auth/refresh", () => {
 
     const res = await request(app.getHttpServer())
       .post("/auth/refresh")
-      .send({ refreshToken: "valid_refresh_token" });
+      .set("Cookie", "refreshToken=valid_refresh_token");
 
     expect(res.status).toBe(HttpStatus.OK);
     expect(res.body.accessToken).toBe("new_access");
-    expect(res.body.refreshToken).toBe("new_refresh");
+    expect(res.body.refreshToken).toBeUndefined();
+    expect(res.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("refreshToken=new_refresh"),
+      ]),
+    );
     expect(redisMock.del).toHaveBeenCalledWith("refresh:old_tid");
   });
 
@@ -244,7 +266,7 @@ describe("POST /auth/refresh", () => {
 
     const res = await request(app.getHttpServer())
       .post("/auth/refresh")
-      .send({ refreshToken: "blacklisted" });
+      .set("Cookie", "refreshToken=blacklisted");
 
     expect(res.status).toBe(HttpStatus.UNAUTHORIZED);
   });
@@ -256,14 +278,20 @@ describe("POST /auth/refresh", () => {
 
     const res = await request(app.getHttpServer())
       .post("/auth/refresh")
-      .send({ refreshToken: "expired" });
+      .set("Cookie", "refreshToken=expired");
+
+    expect(res.status).toBe(HttpStatus.UNAUTHORIZED);
+  });
+
+  it("should 无 refreshToken cookie 返回 401", async () => {
+    const res = await request(app.getHttpServer()).post("/auth/refresh");
 
     expect(res.status).toBe(HttpStatus.UNAUTHORIZED);
   });
 });
 
 describe("POST /auth/logout", () => {
-  it("should 成功登出返回 200 + { success: true }", async () => {
+  it("should 成功登出返回 200 + { success: true }，清 cookie", async () => {
     jwtMock.verify.mockReturnValueOnce({
       userId: "user_123",
       tokenId: "logout_tid",
@@ -271,7 +299,7 @@ describe("POST /auth/logout", () => {
 
     const res = await request(app.getHttpServer())
       .post("/auth/logout")
-      .send({ refreshToken: "valid_refresh" });
+      .set("Cookie", "refreshToken=valid_refresh");
 
     expect(res.status).toBe(HttpStatus.OK);
     expect(res.body).toEqual({ success: true });
@@ -280,6 +308,10 @@ describe("POST /auth/logout", () => {
       "refresh:blacklist:logout_tid",
       "1",
       7 * 24 * 3600,
+    );
+    // 清除 cookie
+    expect(res.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([expect.stringContaining("refreshToken=;")]),
     );
   });
 
@@ -290,7 +322,14 @@ describe("POST /auth/logout", () => {
 
     const res = await request(app.getHttpServer())
       .post("/auth/logout")
-      .send({ refreshToken: "garbage" });
+      .set("Cookie", "refreshToken=garbage");
+
+    expect(res.status).toBe(HttpStatus.OK);
+    expect(res.body).toEqual({ success: true });
+  });
+
+  it("should 无 cookie 也返回 200", async () => {
+    const res = await request(app.getHttpServer()).post("/auth/logout");
 
     expect(res.status).toBe(HttpStatus.OK);
     expect(res.body).toEqual({ success: true });

@@ -8,7 +8,7 @@ import {
   emitAuthRequired,
   onAuthRequired,
 } from '@/lib/api/client'
-import { setAccessToken, setRefreshToken, clearTokens } from '@/lib/tokens'
+import { setAccessToken, clearTokens, getAccessToken } from '@/lib/tokens'
 
 function makeResponse(
   status: number,
@@ -139,25 +139,28 @@ describe('api/client', () => {
   })
 
   describe('request - 401 refresh 逻辑', () => {
-    it('401 时用 refresh token 换 token 后重试原始请求成功', async () => {
-      setRefreshToken('refresh-old')
+    it('401 时用 cookie 中的 refresh token 换 access token 后重试原始请求成功', async () => {
       const urls: string[] = []
       let protectedCount = 0
-      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
-        const url = String(input)
-        urls.push(url)
-        if (url === '/api/auth/refresh') {
-          return makeResponse(200, { accessToken: 'new-access', refreshToken: 'new-refresh' })
-        }
-        if (url === '/api/protected') {
-          protectedCount++
-          if (protectedCount === 1) {
-            return makeResponse(401, { message: 'unauthorized' })
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input)
+          urls.push(url)
+          if (url === '/api/auth/refresh') {
+            // refresh 请求不带 body，带 credentials: 'include'
+            expect(init?.credentials).toBe('include')
+            return makeResponse(200, { accessToken: 'new-access' })
           }
-          return makeResponse(200, { ok: true })
-        }
-        return makeResponse(500, { message: 'unexpected' })
-      })
+          if (url === '/api/protected') {
+            protectedCount++
+            if (protectedCount === 1) {
+              return makeResponse(401, { message: 'unauthorized' })
+            }
+            return makeResponse(200, { ok: true })
+          }
+          return makeResponse(500, { message: 'unexpected' })
+        },
+      )
 
       const data = await request<{ ok: true }>('/protected')
       expect(data).toEqual({ ok: true })
@@ -165,7 +168,7 @@ describe('api/client', () => {
     })
 
     it('refresh 失败时清 token 并 emit auth:required', async () => {
-      setRefreshToken('bad-refresh')
+      setAccessToken('old-access')
       let fired = false
       const off = onAuthRequired(() => {
         fired = true
@@ -185,13 +188,13 @@ describe('api/client', () => {
       expect(thrown).toBeInstanceOf(ApiError)
       const err = thrown as ApiError
       expect(err.status).toBe(401)
-      expect(localStorage.getItem('otm:access')).toBeNull()
-      expect(localStorage.getItem('otm:refresh')).toBeNull()
+      // access token 从内存清除
+      expect(getAccessToken()).toBeNull()
 
       off()
     })
 
-    it('没有 refresh token 时直接失败不重试', async () => {
+    it('cookie 中无 refresh token（refresh 返回 401）时直接失败', async () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(
         makeResponse(401, { message: 'unauthorized' }),
       )
@@ -199,7 +202,6 @@ describe('api/client', () => {
     })
 
     it('skipRefresh: true 时即使 401 也不尝试 refresh', async () => {
-      setRefreshToken('should-not-use')
       const fetchSpy = vi
         .spyOn(globalThis, 'fetch')
         .mockResolvedValue(makeResponse(401, { message: 'session expired' }))
@@ -246,6 +248,26 @@ describe('api/client', () => {
       off()
       emitAuthRequired()
       expect(called).toBe(1)
+    })
+
+    it('force=true 时回调收到 force 参数', () => {
+      let forceVal: boolean | null = null
+      const off = onAuthRequired((force) => {
+        forceVal = force
+      })
+      emitAuthRequired(true)
+      expect(forceVal).toBe(true)
+      off()
+    })
+
+    it('无参数时 force 默认为 false', () => {
+      let forceVal: boolean | null = null
+      const off = onAuthRequired((force) => {
+        forceVal = force
+      })
+      emitAuthRequired()
+      expect(forceVal).toBe(false)
+      off()
     })
 
     it('注册多个 handler 都能被触发', () => {
