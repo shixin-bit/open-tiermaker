@@ -1,0 +1,53 @@
+name: Deploy Frontend to CloudBase Static Hosting
+
+# 前端源码或 shared 包变更时自动部署；也支持手动触发
+# 部署目标：CloudBase 静态网站托管
+# 通过 HTTP 网关在同域名下路由：/* → 静态托管，/api/* → 后端 Run 服务
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/web/**"
+      - "packages/shared/**"
+      - ".github/workflows/deploy-frontend.yml"
+
+# 同一环境只保留一次部署，新的推送取消进行中的旧部署
+concurrency:
+  group: cloudbase-frontend-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm --filter web run build
+
+      - name: Install CloudBase CLI
+        run: npm install -g @cloudbase/cli@latest
+
+      - name: Login to CloudBase
+        run: tcb login --apiKeyId "${{ secrets.TCB_SECRET_ID }}" --apiKey "${{ secrets.TCB_SECRET_KEY }}"
+
+      # 上传构建产物到静态网站托管根目录
+      # 前端 API 调用使用相对路径 /api，由 HTTP 网关路由到后端 Run 服务
+      - name: Deploy to Static Hosting
+        run: tcb hosting deploy ./packages/web/dist / -e "${{ secrets.TCB_ENV_ID }}" --force

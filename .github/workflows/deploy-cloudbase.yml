@@ -1,6 +1,8 @@
 name: Deploy Server to CloudBase Run
 
 # 后端源码或镜像定义变更时自动部署；也支持在 Actions 页面手动触发
+# 部署目标：CloudBase Run 容器服务
+# 通过 HTTP 网关在同域名下路由：/api/* → 本服务，/* → 静态网站托管
 on:
   workflow_dispatch:
   push:
