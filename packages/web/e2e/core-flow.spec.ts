@@ -1,38 +1,60 @@
-﻿import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 
 const API_BASE = 'http://localhost:5173/api'
 const SHARE_ID = 'shabcdef'
+const ACCESS_TOKEN = 'fake-access'
+const REFRESH_TOKEN = 'fake-refresh'
 
 function mockApi(page: Page) {
-  const tokens = { accessToken: 'fake-access', refreshToken: 'fake-refresh' }
   const user = { id: 'u-1', email: 'e2e@test.com', username: 'e2e-user' }
   const boardId = 'b-1'
 
+  // 真实架构：access token 仅存内存（整页跳转后丢失），
+  // refresh token 由 HttpOnly Cookie 管理；这里用 authenticated 标志模拟 cookie 状态
   const state = {
+    authenticated: false,
     visibility: 'private' as 'private' | 'public' | 'unlisted',
     boardShareId: null as string | null,
     hasSharePassword: false,
   }
 
   page.route(`${API_BASE}/auth/register`, async (route) => {
-    await route.fulfill({ status: 201, json: tokens })
+    state.authenticated = true
+    await route.fulfill({
+      status: 201,
+      json: { accessToken: ACCESS_TOKEN, refreshToken: REFRESH_TOKEN, user },
+    })
   })
 
   page.route(`${API_BASE}/auth/login`, async (route) => {
-    await route.fulfill({ status: 200, json: tokens })
+    state.authenticated = true
+    await route.fulfill({
+      status: 200,
+      json: { accessToken: ACCESS_TOKEN, refreshToken: REFRESH_TOKEN, user },
+    })
   })
 
   page.route(`${API_BASE}/auth/logout`, async (route) => {
+    state.authenticated = false
     await route.fulfill({ status: 204, body: '' })
   })
 
+  // 模拟 cookie 刷新：已登录时换取新的内存 access token，未登录返回 401
+  page.route(`${API_BASE}/auth/refresh`, async (route) => {
+    if (state.authenticated) {
+      await route.fulfill({ status: 200, json: { accessToken: ACCESS_TOKEN, user } })
+    } else {
+      await route.fulfill({ status: 401, json: { message: 'No refresh token' } })
+    }
+  })
+
   page.route(`${API_BASE}/auth/session`, async (route) => {
-    const req = route.request()
-    const auth = req.headers().authorization ?? ''
-    if (auth.startsWith('Bearer fake-access')) {
+    const auth = route.request().headers().authorization ?? ''
+    if (auth === `Bearer ${ACCESS_TOKEN}`) {
       await route.fulfill({ status: 200, json: { user } })
     } else {
-      await route.fulfill({ status: 200, json: { user: null } })
+      // 与后端一致：严格 JwtAuthGuard，无有效 access token 返回 401
+      await route.fulfill({ status: 401, json: { message: 'Unauthorized' } })
     }
   })
 
@@ -173,11 +195,21 @@ function mockApi(page: Page) {
 }
 
 test.describe('核心流程', () => {
+  // 未登录整页加载时：session 返回 401 → cookie refresh 也返回 401，
+  // 客户端会自动弹出登录 Modal；继续操作页面前先关闭它
+  async function dismissAuthModal(page: Page) {
+    const closeButton = page.getByRole('button', { name: '关闭', exact: true })
+    await expect(closeButton).toBeVisible({ timeout: 10000 })
+    await closeButton.click()
+    await expect(closeButton).toBeHidden()
+  }
+
   test('注册 → 登录 → 创建 → 保存 → 分享 → 匿名访问', async ({ page }) => {
     mockApi(page)
 
     await page.goto('/')
     await expect(page).toHaveTitle(/Open TierMaker/)
+    await dismissAuthModal(page)
 
     await page
       .getByRole('link', { name: /免费注册/i })
@@ -194,10 +226,13 @@ test.describe('核心流程', () => {
 
     await expect(page.getByRole('button', { name: '登出' })).toBeVisible()
 
+    // 整页跳转后内存 access token 丢失，需等待 cookie 刷新恢复登录态后再操作
     await page.goto('/boards/new')
     await expect(page).toHaveURL(/boards\/new/)
     await page.getByPlaceholder(/例如.*排行/).fill('E2E 排行榜')
-    await page.getByRole('button', { name: /创建云端排行榜/i }).click()
+    const createButton = page.getByRole('button', { name: /创建云端排行榜/i })
+    await expect(createButton).toBeVisible({ timeout: 10000 })
+    await createButton.click()
     await expect(page).toHaveURL(/boards\/b-1/, { timeout: 5000 })
 
     await page.getByText('🔗').first().waitFor()
@@ -218,13 +253,16 @@ test.describe('核心流程', () => {
   test('未登录点击分享触发登录 Modal', async ({ page }) => {
     mockApi(page)
     await page.goto('/')
+    await dismissAuthModal(page)
     await page.goto('/boards/local/local-board-id')
+    await dismissAuthModal(page)
 
     const shareArea = page.getByRole('button', { name: /登录后开启分享能力/i }).first()
     await expect(shareArea).toBeVisible()
     await shareArea.click()
 
-    await expect(page.getByRole('heading', { name: /需要登录/i })).toBeVisible()
-    await expect(page.getByRole('link', { name: /立即登录/i })).toBeVisible()
+    // 用户手动触发（force）即使此前关闭过自动弹窗，也必须再次弹出
+    await expect(page.getByRole('heading', { name: '登录' })).toBeVisible()
+    await expect(page.getByRole('link', { name: '立即注册' })).toBeVisible()
   })
 })

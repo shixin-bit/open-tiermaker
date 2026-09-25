@@ -80,9 +80,11 @@ pnpm --filter server run build
 
 ### API 客户端
 
-- fetch 封装在 `src/lib/api/client.ts`，自动附 `Authorization: Bearer` header
-- 401 自动调 refresh token 重试一次
-- access / refresh token 存 localStorage（key: `otm:access` / `otm:refresh`）
+- fetch 封装在 `src/lib/api/client.ts`，有 access token 时自动附 `Authorization: Bearer` header
+- access token 只存内存（`src/lib/tokens.ts` 的模块变量），**不写 localStorage**；整页刷新后内存丢失，靠 HttpOnly Cookie 静默刷新恢复
+- refresh token 由后端通过 HttpOnly Cookie（名 `refreshToken`，`path=/api/auth`）下发，前端 JS 不读取、不存储
+- 401 时自动带 cookie 调一次 `POST /api/auth/refresh` 换取新 access token 并重试原请求；刷新失败则清除登录态并触发登录 Modal
+- 所有请求使用 `credentials: 'include'`
 
 ### 存储引擎（渐进式登录）
 
@@ -207,6 +209,7 @@ src/
 ### JWT / 鉴权约束
 
 - **双 token 方案**：access token 无状态（验签），refresh token 存 Redis 做轮换和黑名单
+- refresh token 通过 HttpOnly Cookie（`refreshToken`，`path=/api/auth`，`sameSite=lax`，生产环境 `secure`）下发；access token 仅在响应体返回、前端只保存在内存中
 - Access token payload 只放 `{ userId, tokenId }`，不要塞多余字段
 - Refresh token 每次刷新后**旧 token 立即从 Redis 删除**（防重放）
 - 登出时把 refresh token 加到 Redis 黑名单（TTL = refresh token 剩余有效期）
@@ -216,8 +219,8 @@ src/
 
 ### CORS 约束
 
-- 跨域请求（Cloudflare Workers → Render），后端 `enableCors({ origin: FRONTEND_URL, credentials: false })`
-- 不允许 credentials（JWT 走 header 不走 Cookie）
+- 跨域请求（Cloudflare Workers → Render），后端 `enableCors({ origin: FRONTEND_URL, credentials: true })`
+- 必须允许 credentials（refresh token 走 HttpOnly Cookie，前端请求固定带 `credentials: 'include'`）
 - 允许的 headers 至少包含 `Content-Type` 和 `Authorization`
 
 ### 错误处理
@@ -281,5 +284,5 @@ pnpm --filter server test -- --watch
 - ❌ 硬编码配置值（全从 `.env` 读）
 - ❌ 把整个 TierState JSON 塞进一个数据库列（拆成 Board + BoardItem）
 - ❌ 用 `passport.session()` 或 express-session（我们是 JWT，不是 session）
-- ❌ OAuth 回调里让前端拿 access token（前端只能拿 refresh token，再自己换 access）
+- ❌ OAuth 回调里让前端 JS 拿到任何 token（后端回调直接 Set-Cookie 写 refresh token 并重定向到 `/auth/callback`，前端靠 cookie 静默刷新换取内存 access token）
 - ❌ 在生产代码里留 console.log（用 NestJS Logger）
