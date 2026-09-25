@@ -1,6 +1,6 @@
 ---
-name: 'OPSX: Apply'
-description: 'Implement tasks from an OpenSpec change (Experimental)'
+name: "OPSX: Apply"
+description: "Implement tasks from an OpenSpec change (Experimental)"
 ---
 
 Implement tasks from an OpenSpec change.

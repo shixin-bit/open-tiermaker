@@ -1,6 +1,6 @@
 ---
-name: 'OPSX: Explore'
-description: 'Enter explore mode - think through ideas, investigate problems, clarify requirements'
+name: "OPSX: Explore"
+description: "Enter explore mode - think through ideas, investigate problems, clarify requirements"
 ---
 
 Enter explore mode. Think deeply. Visualize freely. Follow the conversation wherever it goes.

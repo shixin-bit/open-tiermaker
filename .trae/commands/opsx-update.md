@@ -1,6 +1,6 @@
 ---
-name: 'OPSX: Update'
-description: 'Update a change - revise existing planning artifacts and keep them coherent (Experimental)'
+name: "OPSX: Update"
+description: "Update a change - revise existing planning artifacts and keep them coherent (Experimental)"
 ---
 
 Revise a change's existing planning artifacts and keep them coherent. Never edit code.

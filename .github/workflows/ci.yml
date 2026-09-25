@@ -113,7 +113,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
 
       - name: Run Playwright tests
         run: pnpm run test:e2e
@@ -150,6 +150,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma Client
+        run: pnpm --filter server exec prisma generate
+
       - name: Build
         run: pnpm run build
         env:
@@ -159,7 +162,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist/
+          path: packages/web/dist/
           retention-days: 7
 
       - name: Setup Pages
@@ -168,7 +171,7 @@ jobs:
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist/
+          path: packages/web/dist/
 
       - name: Deploy to GitHub Pages
         id: pages-deployment

@@ -113,23 +113,23 @@ open-tiermaker/
 
 ```typescript
 interface Tier {
-  id: string // 'S' | 'A' | 'B' | 'C' | 'D'
-  label: string // 显示名称，可自定义
-  color: string // 标签背景色
-  imageIds: string[] // 该等级行中的图片 ID 列表（有顺序）
+  id: string; // 'S' | 'A' | 'B' | 'C' | 'D'
+  label: string; // 显示名称，可自定义
+  color: string; // 标签背景色
+  imageIds: string[]; // 该等级行中的图片 ID 列表（有顺序）
 }
 
 interface ImageItem {
-  id: string
-  src: string // Data URL 或网络 URL
-  source: 'local' | 'url'
-  createdAt: number
+  id: string;
+  src: string; // Data URL 或网络 URL
+  source: "local" | "url";
+  createdAt: number;
 }
 
 interface TierState {
-  tiers: Tier[]
-  pool: string[] // 图片池中图片 ID 列表
-  images: Record<string, ImageItem>
+  tiers: Tier[];
+  pool: string[]; // 图片池中图片 ID 列表
+  images: Record<string, ImageItem>;
 }
 ```
 

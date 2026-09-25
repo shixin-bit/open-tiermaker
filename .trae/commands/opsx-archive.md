@@ -1,6 +1,6 @@
 ---
-name: 'OPSX: Archive'
-description: 'Archive a completed change in the experimental workflow'
+name: "OPSX: Archive"
+description: "Archive a completed change in the experimental workflow"
 ---
 
 Archive a completed change in the experimental workflow.
