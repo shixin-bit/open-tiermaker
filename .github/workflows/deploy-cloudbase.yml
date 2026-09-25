@@ -1,0 +1,64 @@
+name: Deploy Server to CloudBase Run
+
+# 后端源码或镜像定义变更时自动部署；也支持在 Actions 页面手动触发
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/server/**"
+      - "packages/shared/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/deploy-cloudbase.yml"
+
+# 同一环境只保留一次部署，新的推送取消进行中的旧部署
+concurrency:
+  group: cloudbase-run-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to CloudBase Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install CloudBase CLI
+        run: npm install -g @cloudbase/cli@latest
+
+      - name: Login to CloudBase
+        run: tcb login --apiKeyId "${{ secrets.TCB_SECRET_ID }}" --apiKey "${{ secrets.TCB_SECRET_KEY }}"
+
+      # 上传源码由 CloudBase 在云端按根目录 Dockerfile 构建并发布。
+      # 注意：tcb cloudrun deploy 源码部署目前仅支持上海地域环境。
+      # 服务级环境变量（DATABASE_URL/REDIS_URL/JWT_*/OAuth/FRONTEND_URL）
+      # 与公网访问策略在 CloudBase 控制台的服务配置中统一维护。
+      - name: Deploy source to CloudBase Run
+        env:
+          TCB_ENV_ID: ${{ secrets.TCB_ENV_ID }}
+          # 可选：配置后服务实例加入指定 VPC，以内网访问 TencentDB
+          # JSON 形如 {"vpcId":"vpc-xxx","vpcCIDR":"10.0.0.0/16","subnetId":"subnet-xxx","subnetCIDR":"10.0.1.0/24"}
+          TCB_VPC_CONFIG: ${{ secrets.TCB_VPC_CONFIG }}
+        run: |
+          set -euo pipefail
+          args=(
+            -e "$TCB_ENV_ID"
+            -s open-tiermaker-server
+            --source .
+            --port 80
+            --force
+            --yes
+            --wait
+          )
+          if [ -n "$TCB_VPC_CONFIG" ]; then
+            args+=(--vpcConfig "$TCB_VPC_CONFIG")
+          fi
+          tcb cloudrun deploy "${args[@]}"

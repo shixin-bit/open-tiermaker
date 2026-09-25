@@ -1,0 +1,32 @@
+# 版本控制与 CI
+.git
+.github
+.trae
+
+# 依赖与构建产物（镜像内重新安装/构建）
+**/node_modules
+**/dist
+**/coverage
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+
+# 本地环境与日志
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+.dev-*.log
+
+# 文档与规格（不参与镜像构建）
+openspec
+*.md
+
+# 前端与 E2E（后端镜像不需要）
+packages/web
+e2e
+
+# 编辑器/系统文件
+.vscode
+.idea
+.DS_Store
