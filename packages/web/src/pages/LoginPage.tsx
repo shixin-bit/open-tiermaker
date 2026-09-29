@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { useAuth } from '@/hooks/useAuth'
 import { migrateLocalToCloud } from '@/hooks/useBoardState'
 import { ApiError } from '@/lib/api/client'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 export function LoginPage() {
   const [email, setEmail] = useState('')
@@ -41,7 +42,10 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="relative min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="absolute top-4 right-4 z-10">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-2xl font-bold">登录</h1>

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { api, ApiError } from '@/lib/api/client'
 import type { CloudBoardDetail } from '@/hooks/useBoardState'
 import type { Tier, ImageItem } from '@open-tiermaker/shared'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { TierBoard } from '@/components/TierBoard'
 
 export function SharedBoardPage() {
@@ -159,12 +160,15 @@ export function SharedBoardPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card px-6 py-4">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="text-xl font-bold">{board.title}</h1>
-          {board.description && (
-            <p className="text-sm text-muted-foreground mt-1">{board.description}</p>
-          )}
-          <p className="text-xs text-muted-foreground mt-2">只读分享视图</p>
+        <div className="max-w-5xl mx-auto flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold">{board.title}</h1>
+            {board.description && (
+              <p className="text-sm text-muted-foreground mt-1">{board.description}</p>
+            )}
+            <p className="text-xs text-muted-foreground mt-2">只读分享视图</p>
+          </div>
+          <ThemeToggle />
         </div>
       </header>
 

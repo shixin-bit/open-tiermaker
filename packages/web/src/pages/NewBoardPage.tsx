@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { useAuth } from '@/hooks/useAuth'
 import { api, ApiError } from '@/lib/api/client'
 import { generateLocalBoardId, migrateLocalToCloud } from '@/hooks/useBoardState'
@@ -51,7 +52,10 @@ export function NewBoardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-start justify-center p-4 pt-16">
+    <div className="relative min-h-screen bg-background flex items-start justify-center p-4 pt-16">
+      <div className="absolute top-4 right-4 z-10">
+        <ThemeToggle />
+      </div>
       <form
         onSubmit={handleSubmit}
         className="w-full max-w-md space-y-4 p-6 rounded-lg border border-border bg-card"

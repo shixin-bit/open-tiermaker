@@ -1,5 +1,12 @@
 # @open-tiermaker/server
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies
+  - @open-tiermaker/shared@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

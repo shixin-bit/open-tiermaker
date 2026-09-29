@@ -20,8 +20,10 @@ import { ImageUploader } from '@/components/ImageUploader'
 import { UrlImageInput } from '@/components/UrlImageInput'
 import { ExportButton } from '@/components/ExportButton'
 import { SharePanel } from '@/components/SharePanel'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { useAuth } from '@/hooks/useAuth'
 import { useBoardState, migrateLocalToCloud } from '@/hooks/useBoardState'
+import { useEditKeyboardShortcuts } from '@/hooks/useEditKeyboardShortcuts'
 import { saveBoard } from '@/lib/storage'
 import { useLocalStorageSize } from '@/hooks/useLocalStorageSize'
 import type { ImageItem, TierState } from '@open-tiermaker/shared'
@@ -85,11 +87,17 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
     updateVisibility,
     regenerateShareId,
     updateSharePassword,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
   } = useBoardState(boardId, effectiveAuth)
 
   const [activeId, setActiveId] = useState<string | null>(null)
   const [overContainerId, setOverContainerId] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  // 图片选中集合(独立 useState,不入 Undo/Redo 历史栈)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const { mb, warning: storageWarning } = useLocalStorageSize()
 
   // 检测认证状态从 false → true（游客在编辑页登录后触发迁移）
@@ -131,11 +139,14 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
     (src: string, source: 'local' | 'url', cloudId?: string) => {
       const id = cloudId ?? generateId()
       const image: ImageItem = { id, src, source, createdAt: Date.now() }
-      setState((prev: TierState) => ({
-        ...prev,
-        images: { ...prev.images, [id]: image },
-        pool: [...prev.pool, id],
-      }))
+      setState(
+        (prev: TierState) => ({
+          ...prev,
+          images: { ...prev.images, [id]: image },
+          pool: [...prev.pool, id],
+        }),
+        'image-add',
+      )
     },
     [setState],
   )
@@ -153,7 +164,33 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
             imageIds: t.imageIds.filter((id) => id !== imageId),
           })),
         }
-      })
+      }, 'image-remove')
+    },
+    [setState],
+  )
+
+  /**
+   * 批量删除多张图片,单次 dispatch 只入一条 'images-remove' 历史。
+   */
+  const removeImages = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return
+      const idSet = new Set(ids)
+      setState((prev: TierState) => {
+        const restImages: Record<string, ImageItem> = {}
+        for (const [id, img] of Object.entries(prev.images)) {
+          if (!idSet.has(id)) restImages[id] = img
+        }
+        return {
+          ...prev,
+          images: restImages,
+          pool: prev.pool.filter((id) => !idSet.has(id)),
+          tiers: prev.tiers.map((t) => ({
+            ...t,
+            imageIds: t.imageIds.filter((id) => !idSet.has(id)),
+          })),
+        }
+      }, 'images-remove')
     },
     [setState],
   )
@@ -194,7 +231,7 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
         }
 
         return { ...prev, pool, tiers }
-      })
+      }, 'drag')
     },
     [setState],
   )
@@ -202,20 +239,26 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
   const updateTierLabel = useCallback(
     (tierId: string, label: string) => {
       if (label.length === 0 || label.length > 20) return
-      setState((prev: TierState) => ({
-        ...prev,
-        tiers: prev.tiers.map((t) => (t.id === tierId ? { ...t, label } : t)),
-      }))
+      setState(
+        (prev: TierState) => ({
+          ...prev,
+          tiers: prev.tiers.map((t) => (t.id === tierId ? { ...t, label } : t)),
+        }),
+        'tier-label',
+      )
     },
     [setState],
   )
 
   const updateTierColor = useCallback(
     (tierId: string, color: string) => {
-      setState((prev: TierState) => ({
-        ...prev,
-        tiers: prev.tiers.map((t) => (t.id === tierId ? { ...t, color } : t)),
-      }))
+      setState(
+        (prev: TierState) => ({
+          ...prev,
+          tiers: prev.tiers.map((t) => (t.id === tierId ? { ...t, color } : t)),
+        }),
+        'tier-color',
+      )
     },
     [setState],
   )
@@ -234,13 +277,57 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
 
   const handleReset = useCallback(() => {
     if (confirm('确定要重置所有数据吗？')) {
-      setState({
-        tiers: state.tiers.map((t) => ({ ...t, imageIds: [] })),
-        pool: [],
-        images: {},
-      })
+      setState(
+        {
+          tiers: state.tiers.map((t) => ({ ...t, imageIds: [] })),
+          pool: [],
+          images: {},
+        },
+        'reset',
+      )
+      setSelectedIds(new Set())
     }
   }, [setState, state.tiers])
+
+  /**
+   * 图片点击选中:Shift+点击 累积追加;普通点击 单选替换。
+   * 拖拽进行中(activeId 非空)时不响应,避免干扰拖拽。
+   */
+  const handleImageClick = useCallback(
+    (imageId: string, shiftKey: boolean) => {
+      if (activeId !== null) return
+      setSelectedIds((prev) => {
+        if (shiftKey) {
+          const next = new Set(prev)
+          if (next.has(imageId)) next.delete(imageId)
+          else next.add(imageId)
+          return next
+        }
+        return new Set([imageId])
+      })
+    },
+    [activeId],
+  )
+
+  /**
+   * 批量删除当前选中的图片(一次 dispatch,单条 'images-remove' 历史)。
+   */
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedIds.size === 0) return
+    removeImages([...selectedIds])
+    setSelectedIds(new Set())
+  }, [removeImages, selectedIds])
+
+  // 全局键盘快捷键(拖拽中自动 no-op,详见 useEditKeyboardShortcuts)
+  useEditKeyboardShortcuts({
+    undo,
+    redo,
+    save: handleSave,
+    deleteSelected: handleDeleteSelected,
+    clearSelection: () => setSelectedIds(new Set()),
+    isCloud,
+    isDragging: activeId !== null,
+  })
 
   const handleDragStart = (e: DragStartEvent) => setActiveId(String(e.active.id))
   const handleDragOver = (e: DragOverEvent) => {
@@ -359,10 +446,32 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
           <div className="flex items-center gap-2 shrink-0">
             {isCloud && (
               <>
-                {saveStatus === 'saved' && <span className="text-sm text-green-600">已保存</span>}
+                {saveStatus === 'saved' && (
+                  <span className="text-sm text-green-600 dark:text-green-400">已保存</span>
+                )}
                 {saveStatus === 'error' && (
                   <span className="text-sm text-destructive">保存失败</span>
                 )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={undo}
+                  disabled={!canUndo}
+                  aria-label="撤销"
+                  title="撤销 (Ctrl+Z)"
+                >
+                  ↶
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={redo}
+                  disabled={!canRedo}
+                  aria-label="重做"
+                  title="重做 (Ctrl+Shift+Z)"
+                >
+                  ↷
+                </Button>
                 <Button onClick={handleSave} disabled={isSaving} size="sm">
                   {saveStatus === 'saving' ? '保存中…' : '保存'}
                 </Button>
@@ -372,6 +481,7 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
               重置
             </Button>
             <ExportButton targetRef={boardRef} />
+            <ThemeToggle />
           </div>
         </div>
       </header>
@@ -379,7 +489,7 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
       {!isCloud && storageWarning && (
         <div className="bg-amber-500/10 border-b border-amber-500/30 px-6 py-2">
           <div className="max-w-5xl mx-auto flex items-center justify-between gap-4 text-sm">
-            <span className="text-amber-700">
+            <span className="text-amber-700 dark:text-amber-400">
               ⚠️ 本地存储已使用 {mb.toFixed(1)}MB / 5MB，数据可能丢失。
               <Link to="/register" className="underline ml-1 font-medium">
                 注册账号云端保存 →
@@ -430,6 +540,9 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
               onLabelChange={updateTierLabel}
               onColorChange={updateTierColor}
               overContainerId={overContainerId}
+              selectedIds={selectedIds}
+              onImageSelect={handleImageClick}
+              onBackgroundClick={() => setSelectedIds(new Set())}
             />
           </section>
 
@@ -441,12 +554,15 @@ export function EditBoardPage({ boardId: explicitBoardId, forceLocal }: Props) {
               )}
               onRemoveImage={removeImage}
               isOver={overContainerId === 'pool'}
+              selectedIds={selectedIds}
+              onImageSelect={handleImageClick}
+              onBackgroundClick={() => setSelectedIds(new Set())}
             />
           </section>
 
           <DragOverlay dropAnimation={null}>
             {activeId && activeImage ? (
-              <div className="w-24 h-24 rounded-md overflow-hidden border-2 border-primary shadow-xl bg-card">
+              <div className="w-28 h-28 rounded-md overflow-hidden border-2 border-primary shadow-xl bg-card">
                 <img
                   src={activeImage.src}
                   alt=""

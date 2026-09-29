@@ -11,6 +11,7 @@ import {
   loadAllBoards,
   clearAllBoards,
 } from '@/lib/storage'
+import { useUndoRedo } from '@/hooks/useUndoRedo'
 
 export interface CloudBoardSummary {
   id: string
@@ -57,10 +58,24 @@ export interface BoardState extends LocalBoard {
   updateVisibility: (v: 'private' | 'public' | 'unlisted') => Promise<void>
   regenerateShareId: () => Promise<void>
   updateSharePassword: (password: string | null) => Promise<void>
+  // Undo/Redo 历史栈(本期新增)
+  canUndo: boolean
+  canRedo: boolean
+  undo: () => void
+  redo: () => void
 }
 
 export function useBoardState(boardId: string | null, isAuthenticated: boolean) {
-  const [state, setState] = useState<TierState>(DEFAULT_STATE)
+  // TierState 走 Undo/Redo 历史栈;title/description 等元数据保持独立 useState 不入历史栈
+  const {
+    state,
+    set: setState,
+    reset,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+  } = useUndoRedo<TierState>(DEFAULT_STATE)
   const [title, setTitle] = useState('未命名排行榜')
   const [description, setDescription] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(true)
@@ -134,7 +149,8 @@ export function useBoardState(boardId: string | null, isAuthenticated: boolean) 
     let cancelled = false
     load().then((result) => {
       if (cancelled) return
-      setState(result.state)
+      // 加载新榜单时用 reset 清空历史栈,避免 undo 跨榜单回退到旧数据
+      reset(result.state)
       setTitle(result.title)
       setDescription(result.description)
       setVisibility(result.visibility)
@@ -146,7 +162,7 @@ export function useBoardState(boardId: string | null, isAuthenticated: boolean) 
     return () => {
       cancelled = true
     }
-  }, [load])
+  }, [load, reset])
 
   // 游客模式下自动保存到 localStorage（防抖 1 秒），避免用户忘记点保存按钮导致数据丢失
   useEffect(() => {
@@ -244,6 +260,11 @@ export function useBoardState(boardId: string | null, isAuthenticated: boolean) 
     updateVisibility,
     regenerateShareId,
     updateSharePassword,
+    // Undo/Redo 历史(本期新增)
+    canUndo,
+    canRedo,
+    undo,
+    redo,
   }
 }
 

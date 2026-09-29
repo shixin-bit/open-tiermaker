@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/lib/api/client'
 import type { CloudBoardSummary } from '@/hooks/useBoardState'
@@ -82,6 +83,7 @@ export function BoardListPage({ variant = 'all' }: Props) {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             {isAuthenticated ? (
               <Button variant="ghost" size="sm" onClick={() => logout()}>
                 登出
@@ -241,8 +243,8 @@ function BoardCard({
 function VisibilityBadge({ visibility }: { visibility: 'private' | 'public' | 'unlisted' }) {
   const labels = {
     private: { text: '私有', cls: 'bg-muted text-muted-foreground' },
-    public: { text: '公开', cls: 'bg-green-500/10 text-green-600' },
-    unlisted: { text: '不公开', cls: 'bg-amber-500/10 text-amber-600' },
+    public: { text: '公开', cls: 'bg-green-500/10 text-green-600 dark:text-green-400' },
+    unlisted: { text: '不公开', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
   } as const
   const cfg = labels[visibility]
   return <span className={`text-xs px-2 py-0.5 rounded-full ${cfg.cls}`}>{cfg.text}</span>

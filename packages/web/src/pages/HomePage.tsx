@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/hooks/useAuth'
 import { AuthBanner } from '@/components/AuthBanner'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 export function HomePage() {
   const { isAuthenticated } = useAuth()
@@ -29,6 +30,7 @@ export function HomePage() {
                 </Button>
               </>
             )}
+            <ThemeToggle />
           </nav>
         </div>
       </header>

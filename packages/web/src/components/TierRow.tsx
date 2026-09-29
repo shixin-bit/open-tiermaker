@@ -12,6 +12,10 @@ interface TierRowProps {
   onLabelChange: (tierId: string, label: string) => void
   onColorChange: (tierId: string, color: string) => void
   isOver: boolean
+  /** 当前选中集合,用于 ImageCard 描边 */
+  selectedIds?: Set<string>
+  /** 图片点击/Shift+点击 选中回调(透传给 ImageCard) */
+  onImageSelect?: (id: string, shiftKey: boolean) => void
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -29,6 +33,8 @@ export function TierRow({
   onLabelChange,
   onColorChange,
   isOver,
+  selectedIds,
+  onImageSelect,
 }: TierRowProps) {
   const { setNodeRef, isOver: droppableIsOver } = useDroppable({ id: `tier-${tier.id}` })
 
@@ -47,7 +53,7 @@ export function TierRow({
         ref={setNodeRef}
         className={cn(
           'flex-1 flex flex-wrap items-start content-start gap-2 p-3 min-h-[110px] transition-colors',
-          (isOver || droppableIsOver) && 'ring-2 ring-inset ring-primary/60 bg-white/40',
+          (isOver || droppableIsOver) && 'border-2 border-primary bg-primary/5',
         )}
       >
         {tier.imageIds.length === 0 && (
@@ -60,6 +66,8 @@ export function TierRow({
               id={imgId}
               src={imageSrcs[imgId] || ''}
               onRemove={onRemoveImage}
+              selected={selectedIds?.has(imgId) ?? false}
+              onSelect={onImageSelect}
             />
           ))}
         </SortableContext>

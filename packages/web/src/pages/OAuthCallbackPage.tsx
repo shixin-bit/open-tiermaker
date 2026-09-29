@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { useAuth } from '@/hooks/useAuth'
 import { migrateLocalToCloud } from '@/hooks/useBoardState'
 
@@ -28,7 +29,10 @@ export function OAuthCallbackPage() {
   }, [isAuthenticated, loading, navigate])
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center">
+    <div className="relative min-h-screen bg-background flex items-center justify-center">
+      <div className="absolute top-4 right-4 z-10">
+        <ThemeToggle />
+      </div>
       <div className="text-center space-y-4">
         {showAuthError ? (
           <p className="text-destructive">登录失败，请重试</p>
